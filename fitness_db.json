@@ -1,6 +1,6 @@
 {
     "milk 3%": { "calories": 60.0, "protein": 3.2 },
-    "milk 1%": { "calories": 43.0, "protein": 3.4 },
+    "milk 1%": { "calories": 43.0, "protein": 3.35 },
     "white cheese 5%": { "calories": 95.0, "protein": 8.5 },
     "cottage cheese 5%": { "calories": 98.0, "protein": 11.0 },
     "yellow cheese 28%": { "calories": 350.0, "protein": 25.0 },
@@ -14,7 +14,7 @@
     "goat milk": { "calories": 69.0, "protein": 3.6 },
     "soy milk unsweetened": { "calories": 33.0, "protein": 3.3 },
     "almond milk": { "calories": 13.0, "protein": 0.4 },
-    "chicken breast": { "calories": 165.0, "protein": 31.0 },
+    "chicken breast": { "calories": 157.0, "protein": 31.0 },
     "chicken thigh (pargit)": { "calories": 210.0, "protein": 24.0 },
     "ground beef lean": { "calories": 200.0, "protein": 26.0 },
     "beef fillet": { "calories": 250.0, "protein": 26.0 },
@@ -73,65 +73,11 @@
     "pita bread": { "calories": 275.0, "protein": 9.0 },
     "corn": { "calories": 86.0, "protein": 3.2 },
     "buckwheat cooked": { "calories": 92.0, "protein": 3.4 },
-    "couscous cooked": { "calories": 112.0, "protein": 3.8 }
-    "oats": {
-        "calories": 389.0,
-        "protein": 16.9
-    },
-    "greek yogurt 0%": {
-        "calories": 59.0,
-        "protein": 10.0
-    },
-    "tuna in water": {
-        "calories": 116.0,
-        "protein": 26.0
-    },
-    "beef fillet": {
-        "calories": 250.0,
-        "protein": 26.0
-    },
-    "salmon": {
-        "calories": 208.0,
-        "protein": 20.0
-    },
-    "tofu": {
-        "calories": 76.0,
-        "protein": 8.0
-    },
-    "sweet potato": {
-        "calories": 86.0,
-        "protein": 1.6
-    },
-    "quinoa": {
-        "calories": 120.0,
-        "protein": 4.4
-    },
-    "peanut butter": {
-        "calories": 588.0,
-        "protein": 25.0
-    },
-    "cottage cheese 5%": {
-        "calories": 98.0,
-        "protein": 11.0
-    },
-    "turkey breast": {
-        "calories": 135.0,
-        "protein": 30.0
-    },
-    "lentils": {
-        "calories": 116.0,
-        "protein": 9.0
-    },
-    "almonds": {
-        "calories": 579.0,
-        "protein": 21.0
-    },
-    "pasta (cooked)": {
-        "calories": 131.0,
-        "protein": 5.0
-    },
-    "egg (whole)": {
-        "calories": 155.0,
-        "protein": 13.0
-    }
+    "couscous cooked": { "calories": 112.0, "protein": 3.8 },
+    "tofu": { "calories": 76.0, "protein": 8.0 },
+    "peanut butter": { "calories": 588.0, "protein": 25.0 },
+    "almonds": { "calories": 579.0, "protein": 21.0 },
+    "egg (whole)": { "calories": 155.0, "protein": 13.0 },
+    "whites cheese 5%": { "calories": 178.0, "protein": 33.0 },
+    "egg whites": { "calories": 52.0, "protein": 10.9 }
 }

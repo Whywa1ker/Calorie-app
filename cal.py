@@ -18,7 +18,9 @@ OFFLINE_DB = {
     "raw tahini": {"cals": 640, "prot": 24.0, "carb": 12.0, "fat": 54.0},
     "hummus": {"cals": 250, "prot": 8.0, "carb": 14.0, "fat": 18.0},
     "oats": {"cals": 389, "prot": 16.9, "carb": 66.0, "fat": 6.9},
-    "buckwheat": {"cals": 343, "prot": 13.2, "carb": 71.5, "fat": 3.4}
+    "buckwheat": {"cals": 343, "prot": 13.2, "carb": 71.5, "fat": 3.4},
+    "bamba": {"cals": 534, "prot": 15.0, "carb": 40.0, "fat": 35.0},
+    "bissli": {"cals": 490, "prot": 9.0, "carb": 60.0, "fat": 24.0}
 }
 
 # --- 2. Data Fetching & Translation Functions ---
@@ -36,23 +38,37 @@ def get_food_by_barcode(barcode):
     return None
 
 @st.cache_data(show_spinner=False)
-def search_food_multilingual(query):
-    # Auto-translate the input to English for better global search results
+def robust_search(query):
+    results = []
+    url = "https://world.openfoodfacts.org/cgi/search.pl"
+    
+    # Logic A: Search the exact input first (best for brands/local names)
+    try:
+        res = requests.get(url, params={"action": "process", "search_terms": query, "json": "True", "fields": "product_name,nutriments,brands"}, timeout=5)
+        if res.status_code == 200:
+            results.extend(res.json().get("products", []))
+    except:
+        pass
+        
+    # Logic B: Try translating to English as a fallback
     try:
         translated_query = GoogleTranslator(source='auto', target='en').translate(query)
-        st.caption(f"*(Auto-translated search: '{translated_query}')*")
+        if translated_query.lower() != query.lower():
+            res_trans = requests.get(url, params={"action": "process", "search_terms": translated_query, "json": "True", "fields": "product_name,nutriments,brands"}, timeout=5)
+            if res_trans.status_code == 200:
+                results.extend(res_trans.json().get("products", []))
     except:
-        translated_query = query # Fallback if translation fails
-
-    url = "https://world.openfoodfacts.org/cgi/search.pl"
-    params = {"action": "process", "search_terms": translated_query, "json": "True", "fields": "product_name,nutriments,brands"}
-    try:
-        res = requests.get(url, params=params, timeout=5)
-        if res.status_code == 200:
-            return res.json().get("products", [])
-    except:
-        return []
-    return []
+        pass
+        
+    # Remove duplicates
+    seen = set()
+    unique = []
+    for p in results:
+        name = p.get('product_name')
+        if name and name not in seen:
+            seen.add(name)
+            unique.append(p)
+    return unique
 
 # --- Session State ---
 if 'daily_log' not in st.session_state:
@@ -90,7 +106,6 @@ if search_input:
     cals_100 = prot_100 = carb_100 = fat_100 = 0
     found = False
     
-    # Check if input is a barcode
     if search_input.isdigit():
         product = get_food_by_barcode(search_input)
         if product:
@@ -101,16 +116,9 @@ if search_input:
             carb_100 = nutrients.get("carbohydrates_100g", 0)
             fat_100  = nutrients.get("fat_100g", 0)
             found = True
-            
-    # Text Search (Multi-Language)
     else:
-        # Translate input to English just to check local DB first
-        try:
-            en_search = GoogleTranslator(source='auto', target='en').translate(search_input).lower()
-        except:
-            en_search = search_input.lower()
-            
-        local_matches = [name for name in OFFLINE_DB.keys() if en_search in name.lower()]
+        # Check Offline DB first
+        local_matches = [name for name in OFFLINE_DB.keys() if search_input.lower() in name.lower()]
         
         if local_matches:
             selected_local = st.selectbox("Found in local database:", local_matches)
@@ -122,11 +130,11 @@ if search_input:
                 fat_100  = OFFLINE_DB[selected_local]["fat"]
                 found = True
         
-        # If not found locally, search global API using the translation
         if not found:
-            results = search_food_multilingual(search_input)
+            results = robust_search(search_input)
             if results:
-                options = {f"{p.get('product_name', 'Unknown')} ({p.get('brands', 'N/A')})": p for p in results[:5]}
+                # Show top 10 options to give the user a good selection
+                options = {f"{p.get('product_name', 'Unknown')} ({p.get('brands', 'N/A')})": p for p in results[:10]}
                 selected_global = st.selectbox("Found in global database:", list(options.keys()))
                 if selected_global:
                     product = options[selected_global]

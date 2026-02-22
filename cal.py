@@ -67,37 +67,78 @@ def get_csv_download_link(df, filename="my_nutrition_log.csv"):
     b64 = base64.b64encode(csv.encode()).decode()
     return f'<a href="data:file/csv;base64,{b64}" download="{filename}" style="display:inline-block; padding:8px 16px; background-color:#ff4b4b; color:white; text-align:center; text-decoration:none; border-radius:4px;">📥 Download CSV Log</a>'
 
-# --- 3. Session State ---
+# --- 3. Session State Initializations ---
 if 'daily_log' not in st.session_state: st.session_state.daily_log = []
 if 'exercise_log' not in st.session_state: st.session_state.exercise_log = []
 if 'water' not in st.session_state: st.session_state.water = 0
-if 'body_weight' not in st.session_state: st.session_state.body_weight = 75.0
 if 'custom_foods' not in st.session_state: st.session_state.custom_foods = {}
 
 # Merge custom foods into offline DB
 COMBINED_DB = {**OFFLINE_DB, **st.session_state.custom_foods}
 
-# --- 4. UI Setup ---
+# --- 4. UI Setup & Sidebar Settings ---
 st.set_page_config(page_title="MyFitness Pro", page_icon="💪", layout="centered")
 
 with st.sidebar:
-    st.header("🎯 Daily Goals")
-    goal_cals = st.number_input("Calories", value=2500, step=100)
+    st.header("⚙️ Personal Settings")
+    
+    # 1. Choose Calculation Method
+    calc_mode = st.radio("Calorie Target Method:", ["Auto Calculate (TDEE)", "Manual Input"])
+    
+    if calc_mode == "Auto Calculate (TDEE)":
+        st.markdown("**Your Details:**")
+        gender = st.selectbox("Gender", ["Male", "Female"])
+        age = st.number_input("Age", min_value=10, max_value=100, value=25)
+        weight = st.number_input("Weight (kg)", min_value=30.0, max_value=200.0, value=75.0, step=0.5)
+        height = st.number_input("Height (cm)", min_value=100.0, max_value=250.0, value=175.0, step=1.0)
+        
+        st.markdown("**Activity Level:**")
+        activity_level = st.selectbox("How active are you?", [
+            "Sedentary (Little or no exercise)",
+            "Lightly active (1-3 days/week)",
+            "Moderately active (3-5 days/week)",
+            "Very active (6-7 days/week)",
+            "Super active (Physical job / Heavy training)"
+        ])
+        
+        # Multipliers
+        activity_multipliers = {
+            "Sedentary (Little or no exercise)": 1.2,
+            "Lightly active (1-3 days/week)": 1.375,
+            "Moderately active (3-5 days/week)": 1.55,
+            "Very active (6-7 days/week)": 1.725,
+            "Super active (Physical job / Heavy training)": 1.9
+        }
+        
+        # Calculate BMR (Mifflin-St Jeor)
+        if gender == "Male":
+            bmr = (10 * weight) + (6.25 * height) - (5 * age) + 5
+        else:
+            bmr = (10 * weight) + (6.25 * height) - (5 * age) - 161
+            
+        tdee = bmr * activity_multipliers[activity_level]
+        goal_cals = int(tdee)
+        
+        st.success(f"**Target: {goal_cals} kcal/day**")
+        st.caption(f"BMR: {int(bmr)} kcal (Resting burn rate)")
+
+    else:
+        goal_cals = st.number_input("Manual Calories Goal:", min_value=1000, max_value=6000, value=2500, step=50)
+
+    st.markdown("---")
+    st.header("🎯 Macro Goals")
     goal_prot = st.number_input("Protein (g)", value=150, step=10)
     goal_carb = st.number_input("Carbs (g)", value=250, step=10)
     goal_fat = st.number_input("Fat (g)", value=80, step=5)
     
     st.markdown("---")
-    st.header("⚖️ Body Weight")
-    st.session_state.body_weight = st.number_input("Current Weight (kg)", value=st.session_state.body_weight, step=0.5)
-    
-    st.markdown("---")
     st.header("💧 Water Tracker")
-    col1, col2, col3 = st.columns([1,1,1])
-    if col1.button("➖"): st.session_state.water = max(0, st.session_state.water - 1)
-    col2.markdown(f"<h3 style='text-align:center;'>{st.session_state.water}</h3>", unsafe_allow_html=True)
-    if col3.button("➕"): st.session_state.water += 1
+    w_col1, w_col2, w_col3 = st.columns([1,1,1])
+    if w_col1.button("➖"): st.session_state.water = max(0, st.session_state.water - 1)
+    w_col2.markdown(f"<h3 style='text-align:center;'>{st.session_state.water}</h3>", unsafe_allow_html=True)
+    if w_col3.button("➕"): st.session_state.water += 1
 
+# --- MAIN APP ---
 st.markdown("<h1 style='text-align: center;'>💪 MyFitness Pro</h1>", unsafe_allow_html=True)
 st.write("")
 
@@ -120,7 +161,6 @@ with tab_dash:
     net_cals = total_food_cals - total_burned
     cals_remaining = goal_cals - net_cals
 
-    # Calories Equation
     st.markdown("### Calories Remaining")
     eq1, eq2, eq3, eq4, eq5, eq6, eq7 = st.columns([2,1,2,1,2,1,2])
     eq1.metric("Goal", f"{goal_cals}")
@@ -134,7 +174,6 @@ with tab_dash:
     st.progress(min(net_cals / goal_cals, 1.0) if goal_cals > 0 else 0)
     
     if not df_food.empty:
-        # Macros Chart
         st.markdown("---")
         st.markdown("### Macros")
         macro_df = pd.DataFrame({"Macro": ["Protein", "Carbs", "Fat"], "Grams": [total_prot, total_carb, total_fat]})
@@ -142,33 +181,31 @@ with tab_dash:
         fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=250)
         st.plotly_chart(fig, use_container_width=True)
 
-    
+        st.markdown("---")
+        st.markdown("### Meals Diary")
+        for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"]:
+            meal_data = df_food[df_food["Meal"] == meal] if not df_food.empty else pd.DataFrame()
+            meal_cals = meal_data["Calories"].sum() if not meal_data.empty else 0
+            with st.expander(f"🍽️ {meal}  |  {meal_cals:.0f} kcal"):
+                if not meal_data.empty:
+                    st.dataframe(meal_data.drop(columns=["Meal"]), hide_index=True, use_container_width=True)
+                else:
+                    st.caption("Empty")
 
-    st.markdown("---")
-    st.markdown("### Meals Diary")
-    for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"]:
-        meal_data = df_food[df_food["Meal"] == meal] if not df_food.empty else pd.DataFrame()
-        meal_cals = meal_data["Calories"].sum() if not meal_data.empty else 0
-        with st.expander(f"🍽️ {meal}  |  {meal_cals:.0f} kcal"):
-            if not meal_data.empty:
-                st.dataframe(meal_data.drop(columns=["Meal"]), hide_index=True, use_container_width=True)
-            else:
-                st.caption("Empty")
-
-    if not df_food.empty:
         st.write("")
         st.markdown(get_csv_download_link(df_food), unsafe_allow_html=True)
         if st.button("🗑️ Clear Diary", use_container_width=True):
             st.session_state.daily_log = []
             st.session_state.exercise_log = []
             st.rerun()
+    else:
+        st.info("Your diary is empty. Go to the 'Search & Add' tab to start tracking!")
 
 # ==========================================
 # TAB 2: ADD FOOD
 # ==========================================
 with tab_add_food:
     selected_meal = st.radio("Log to:", ["Breakfast", "Lunch", "Dinner", "Snacks"], horizontal=True)
-    
     search_input = st.text_input("🔍 Search Food or Scan Barcode:", placeholder="Enter name in any language or barcode...")
     
     if search_input:

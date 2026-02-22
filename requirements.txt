@@ -4,3 +4,4 @@ requests
 pyzbar
 Pillow
 deep-translator
+plotly

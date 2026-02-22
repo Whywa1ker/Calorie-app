@@ -4,6 +4,8 @@ import requests
 from PIL import Image, ImageEnhance
 from pyzbar.pyzbar import decode
 from deep_translator import GoogleTranslator
+import plotly.express as px
+import base64
 
 # --- 1. Offline Local Database ---
 OFFLINE_DB = {
@@ -20,11 +22,10 @@ OFFLINE_DB = {
     "oats": {"cals": 389, "prot": 16.9, "carb": 66.0, "fat": 6.9},
     "buckwheat": {"cals": 343, "prot": 13.2, "carb": 71.5, "fat": 3.4},
     "bamba": {"cals": 534, "prot": 15.0, "carb": 40.0, "fat": 35.0},
-    "bissli": {"cals": 490, "prot": 9.0, "carb": 60.0, "fat": 24.0},
     "tuna": {"cals": 116, "prot": 26.0, "carb": 0.0, "fat": 1.0}
 }
 
-# --- 2. Data Fetching & Translation Functions ---
+# --- 2. APIs & Functions ---
 @st.cache_data(show_spinner=False)
 def translate_query(query):
     try:
@@ -36,11 +37,9 @@ def translate_query(query):
 def get_food_by_barcode(barcode):
     url = f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get("status") == 1:
-                return data.get("product")
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200 and res.json().get("status") == 1:
+            return res.json().get("product")
     except:
         return None
     return None
@@ -55,9 +54,7 @@ def robust_global_search(en_query):
             results.extend(res.json().get("products", []))
     except:
         pass
-        
-    seen = set()
-    unique = []
+    seen, unique = set(), []
     for p in results:
         name = p.get('product_name')
         if name and name not in seen:
@@ -65,177 +62,196 @@ def robust_global_search(en_query):
             unique.append(p)
     return unique
 
-# --- Session State Initializations ---
-if 'daily_log' not in st.session_state:
-    st.session_state.daily_log = []
+def get_csv_download_link(df, filename="my_nutrition_log.csv"):
+    csv = df.to_csv(index=False)
+    b64 = base64.b64encode(csv.encode()).decode()
+    return f'<a href="data:file/csv;base64,{b64}" download="{filename}" style="display:inline-block; padding:8px 16px; background-color:#ff4b4b; color:white; text-align:center; text-decoration:none; border-radius:4px;">📥 Download CSV Log</a>'
 
-# --- UI Setup ---
-st.set_page_config(page_title="Macro Tracker Pro", page_icon="💪", layout="centered")
+# --- 3. Session State ---
+if 'daily_log' not in st.session_state: st.session_state.daily_log = []
+if 'exercise_log' not in st.session_state: st.session_state.exercise_log = []
+if 'water' not in st.session_state: st.session_state.water = 0
+if 'body_weight' not in st.session_state: st.session_state.body_weight = 75.0
+if 'custom_foods' not in st.session_state: st.session_state.custom_foods = {}
 
-# --- SIDEBAR: Daily Goals ---
+# Merge custom foods into offline DB
+COMBINED_DB = {**OFFLINE_DB, **st.session_state.custom_foods}
+
+# --- 4. UI Setup ---
+st.set_page_config(page_title="MyFitness Pro", page_icon="💪", layout="centered")
+
 with st.sidebar:
-    st.header("🎯 Your Daily Targets")
-    st.caption("Set your nutrition goals to track your progress throughout the day.")
-    
-    goal_cals = st.number_input("🔥 Calories Goal:", min_value=1000, max_value=6000, value=2500, step=100)
-    goal_prot = st.number_input("🥩 Protein Goal (g):", min_value=50, max_value=300, value=150, step=10)
-    goal_carb = st.number_input("🍞 Carbs Goal (g):", min_value=50, max_value=600, value=250, step=10)
-    goal_fat = st.number_input("🥑 Fat Goal (g):", min_value=20, max_value=200, value=80, step=5)
+    st.header("🎯 Daily Goals")
+    goal_cals = st.number_input("Calories", value=2500, step=100)
+    goal_prot = st.number_input("Protein (g)", value=150, step=10)
+    goal_carb = st.number_input("Carbs (g)", value=250, step=10)
+    goal_fat = st.number_input("Fat (g)", value=80, step=5)
     
     st.markdown("---")
-    st.caption("App created for smart, fast, and multilingual food tracking.")
+    st.header("⚖️ Body Weight")
+    st.session_state.body_weight = st.number_input("Current Weight (kg)", value=st.session_state.body_weight, step=0.5)
+    
+    st.markdown("---")
+    st.header("💧 Water Tracker")
+    col1, col2, col3 = st.columns([1,1,1])
+    if col1.button("➖"): st.session_state.water = max(0, st.session_state.water - 1)
+    col2.markdown(f"<h3 style='text-align:center;'>{st.session_state.water}</h3>", unsafe_allow_html=True)
+    if col3.button("➕"): st.session_state.water += 1
 
-# --- MAIN HEADER ---
-st.markdown("<h1 style='text-align: center;'>💪 Macro Tracker Pro</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; color: gray;'>The easiest way to track your daily nutrition and hit your goals.</p>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>💪 MyFitness Pro</h1>", unsafe_allow_html=True)
 st.write("")
 
-# --- TABS FOR CLEAN UI ---
-tab_add, tab_log = st.tabs(["🔍 1. Search & Add Food", "📊 2. My Dashboard"])
+# --- TABS ---
+tab_dash, tab_add_food, tab_exercise, tab_custom = st.tabs(["📊 Diary", "🔍 Add Food", "🏃‍♂️ Exercise", "⚙️ Custom"])
 
-with tab_add:
-    st.markdown("### 📷 Option A: Scan Barcode")
-    with st.expander("Tap here to open camera scanner", expanded=False):
-        camera_photo = st.camera_input("Take a clear picture of the barcode", label_visibility="collapsed")
+# ==========================================
+# TAB 1: DIARY & DASHBOARD
+# ==========================================
+with tab_dash:
+    df_food = pd.DataFrame(st.session_state.daily_log)
+    df_ex = pd.DataFrame(st.session_state.exercise_log)
     
-    scanned_barcode = ""
-    if camera_photo is not None:
-        image = Image.open(camera_photo)
-        decoded_objects = decode(image)
-        if not decoded_objects:
-            gray_image = image.convert('L')
-            enhancer = ImageEnhance.Contrast(gray_image)
-            enhanced_image = enhancer.enhance(3.0)
-            decoded_objects = decode(enhanced_image)
+    total_food_cals = df_food['Calories'].sum() if not df_food.empty else 0
+    total_prot = df_food['Protein'].sum() if not df_food.empty else 0
+    total_carb = df_food['Carbs'].sum() if not df_food.empty else 0
+    total_fat = df_food['Fat'].sum() if not df_food.empty else 0
+    total_burned = df_ex['Burned'].sum() if not df_ex.empty else 0
+    
+    net_cals = total_food_cals - total_burned
+    cals_remaining = goal_cals - net_cals
 
-        if decoded_objects:
-            scanned_barcode = decoded_objects[0].data.decode("utf-8")
-            st.success(f"Barcode Detected: {scanned_barcode}")
-        else:
-            st.error("Could not read barcode. Try again with better lighting.")
+    # Calories Equation
+    st.markdown("### Calories Remaining")
+    eq1, eq2, eq3, eq4, eq5, eq6, eq7 = st.columns([2,1,2,1,2,1,2])
+    eq1.metric("Goal", f"{goal_cals}")
+    eq2.markdown("<h4>-</h4>", unsafe_allow_html=True)
+    eq3.metric("Food", f"{total_food_cals:.0f}")
+    eq4.markdown("<h4>+</h4>", unsafe_allow_html=True)
+    eq5.metric("Exercise", f"{total_burned:.0f}")
+    eq6.markdown("<h4>=</h4>", unsafe_allow_html=True)
+    eq7.metric("Remaining", f"{cals_remaining:.0f}")
+    
+    st.progress(min(net_cals / goal_cals, 1.0) if goal_cals > 0 else 0)
+    
+    if not df_food.empty:
+        # Macros Chart
+        st.markdown("---")
+        st.markdown("### Macros")
+        macro_df = pd.DataFrame({"Macro": ["Protein", "Carbs", "Fat"], "Grams": [total_prot, total_carb, total_fat]})
+        fig = px.pie(macro_df, values='Grams', names='Macro', hole=0.4, color='Macro', color_discrete_map={'Protein':'#EF553B', 'Carbs':'#636EFA', 'Fat':'#00CC96'})
+        fig.update_layout(margin=dict(t=0, b=0, l=0, r=0), height=250)
+        st.plotly_chart(fig, use_container_width=True)
+
+    
 
     st.markdown("---")
-    st.markdown("### 🔎 Option B: Search Database")
-    st.caption("You can type in ANY language (English, Hebrew, Russian, etc.)")
-    search_input = st.text_input("Enter Barcode or Food Name:", value=scanned_barcode, placeholder="e.g., Cottage cheese, תפוח, гречка...")
+    st.markdown("### Meals Diary")
+    for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"]:
+        meal_data = df_food[df_food["Meal"] == meal] if not df_food.empty else pd.DataFrame()
+        meal_cals = meal_data["Calories"].sum() if not meal_data.empty else 0
+        with st.expander(f"🍽️ {meal}  |  {meal_cals:.0f} kcal"):
+            if not meal_data.empty:
+                st.dataframe(meal_data.drop(columns=["Meal"]), hide_index=True, use_container_width=True)
+            else:
+                st.caption("Empty")
 
+    if not df_food.empty:
+        st.write("")
+        st.markdown(get_csv_download_link(df_food), unsafe_allow_html=True)
+        if st.button("🗑️ Clear Diary", use_container_width=True):
+            st.session_state.daily_log = []
+            st.session_state.exercise_log = []
+            st.rerun()
+
+# ==========================================
+# TAB 2: ADD FOOD
+# ==========================================
+with tab_add_food:
+    selected_meal = st.radio("Log to:", ["Breakfast", "Lunch", "Dinner", "Snacks"], horizontal=True)
+    
+    search_input = st.text_input("🔍 Search Food or Scan Barcode:", placeholder="Enter name in any language or barcode...")
+    
     if search_input:
         product_name = ""
-        cals_100 = prot_100 = carb_100 = fat_100 = 0
+        c_100 = p_100 = ch_100 = f_100 = 0
         found = False
         
-        with st.spinner("Searching Global Database..."):
+        with st.spinner("Searching..."):
             if search_input.isdigit():
                 product = get_food_by_barcode(search_input)
                 if product:
-                    product_name = f"{product.get('product_name', 'Unknown')} ({product.get('brands', 'Unknown')})"
-                    nutrients = product.get('nutriments', {})
-                    cals_100 = nutrients.get("energy-kcal_100g", 0)
-                    prot_100 = nutrients.get("proteins_100g", 0)
-                    carb_100 = nutrients.get("carbohydrates_100g", 0)
-                    fat_100  = nutrients.get("fat_100g", 0)
+                    product_name = f"{product.get('product_name', 'Unknown')}"
+                    n = product.get('nutriments', {})
+                    c_100, p_100, ch_100, f_100 = n.get("energy-kcal_100g", 0), n.get("proteins_100g", 0), n.get("carbohydrates_100g", 0), n.get("fat_100g", 0)
                     found = True
             else:
                 en_search = translate_query(search_input)
-                local_matches = [name for name in OFFLINE_DB.keys() if en_search in name.lower() or search_input.lower() in name.lower()]
+                local_matches = [name for name in COMBINED_DB.keys() if en_search in name.lower() or search_input.lower() in name.lower()]
                 
                 if local_matches:
-                    selected_local = st.selectbox("Select exact match (Fast Local Database):", local_matches)
+                    selected_local = st.selectbox("Local/Custom Matches:", local_matches)
                     if selected_local:
                         product_name = selected_local.title()
-                        cals_100 = OFFLINE_DB[selected_local]["cals"]
-                        prot_100 = OFFLINE_DB[selected_local]["prot"]
-                        carb_100 = OFFLINE_DB[selected_local]["carb"]
-                        fat_100  = OFFLINE_DB[selected_local]["fat"]
+                        db_item = COMBINED_DB[selected_local]
+                        c_100, p_100, ch_100, f_100 = db_item["cals"], db_item["prot"], db_item["carb"], db_item["fat"]
                         found = True
                 
                 if not found:
                     results = robust_global_search(en_search)
                     if results:
                         options = {f"{p.get('product_name', 'Unknown')} ({p.get('brands', 'N/A')})": p for p in results[:10]}
-                        selected_global = st.selectbox("Select exact match (Global Database):", list(options.keys()))
+                        selected_global = st.selectbox("Global Matches:", list(options.keys()))
                         if selected_global:
-                            product = options[selected_global]
                             product_name = selected_global
-                            nutrients = product.get('nutriments', {})
-                            cals_100 = nutrients.get("energy-kcal_100g", 0)
-                            prot_100 = nutrients.get("proteins_100g", 0)
-                            carb_100 = nutrients.get("carbohydrates_100g", 0)
-                            fat_100  = nutrients.get("fat_100g", 0)
+                            n = options[selected_global].get('nutriments', {})
+                            c_100, p_100, ch_100, f_100 = n.get("energy-kcal_100g", 0), n.get("proteins_100g", 0), n.get("carbohydrates_100g", 0), n.get("fat_100g", 0)
                             found = True
 
         if found:
-            st.write("")
             with st.container(border=True):
-                st.markdown(f"#### 🍽️ {product_name}")
-                st.caption(f"Base values per 100g ➔ Calories: {cals_100} | Protein: {prot_100}g")
+                st.markdown(f"#### {product_name}")
+                st.caption(f"Per 100g: {c_100}kcal | {p_100}g P | {ch_100}g C | {f_100}g F")
+                weight = st.number_input("Amount (grams):", min_value=1.0, value=100.0, step=10.0)
                 
-                st.write("")
-                weight = st.number_input("⚖️ How many grams did you eat?", min_value=1.0, value=100.0, step=10.0)
+                cur_c, cur_p, cur_ch, cur_f = (c_100*weight)/100, (p_100*weight)/100, (ch_100*weight)/100, (f_100*weight)/100
+                st.write(f"**Total:** {cur_c:.0f} kcal")
                 
-                cur_c = (cals_100 * weight) / 100
-                cur_p = (prot_100 * weight) / 100
-                cur_ch = (carb_100 * weight) / 100
-                cur_f = (fat_100 * weight) / 100
-                
-                st.markdown("##### 💡 Total for this meal:")
-                p_col1, p_col2, p_col3, p_col4 = st.columns(4)
-                p_col1.metric("Calories", f"{cur_c:.0f}")
-                p_col2.metric("Protein", f"{cur_p:.1f}g")
-                p_col3.metric("Carbs", f"{cur_ch:.1f}g")
-                p_col4.metric("Fat", f"{cur_f:.1f}g")
-                
-                st.write("")
-                if st.button("➕ ADD TO MY DAY", type="primary", use_container_width=True):
+                if st.button("➕ ADD", type="primary", use_container_width=True):
                     st.session_state.daily_log.append({
-                        "Food Item": product_name, "Weight (g)": weight, "Calories": round(cur_c, 1),
-                        "Protein (g)": round(cur_p, 1), "Carbs (g)": round(cur_ch, 1), "Fat (g)": round(cur_f, 1)
+                        "Meal": selected_meal, "Food": product_name, "Grams": weight, 
+                        "Calories": round(cur_c, 1), "Protein": round(cur_p, 1), "Carbs": round(cur_ch, 1), "Fat": round(cur_f, 1)
                     })
-                    st.success("Meal Added! Go to 'My Dashboard' to see your progress.")
-        else:
-            if search_input:
-                st.warning("Product not found. Try a different search term.")
+                    st.success("Added!")
 
-with tab_log:
-    st.markdown("### 📈 Your Daily Progress")
+# ==========================================
+# TAB 3: EXERCISE
+# ==========================================
+with tab_exercise:
+    st.markdown("### Log Workout")
+    ex_name = st.text_input("Exercise Name (e.g., Weightlifting, Running)")
+    ex_cals = st.number_input("Calories Burned", min_value=0, step=50)
     
-    if st.session_state.daily_log:
-        df = pd.DataFrame(st.session_state.daily_log)
-        
-        total_cals = df['Calories'].sum()
-        total_prot = df['Protein (g)'].sum()
-        total_carb = df['Carbs (g)'].sum()
-        total_fat = df['Fat (g)'].sum()
+    if st.button("➕ Add Exercise", type="primary"):
+        if ex_name and ex_cals > 0:
+            st.session_state.exercise_log.append({"Exercise": ex_name, "Burned": ex_cals})
+            st.success("Exercise logged! Check Dashboard.")
+    
+    if st.session_state.exercise_log:
+        st.dataframe(pd.DataFrame(st.session_state.exercise_log), use_container_width=True, hide_index=True)
 
-        # --- PROGRESS BARS ---
-        st.write("**🔥 Calories Progress**")
-        cal_pct = min(total_cals / goal_cals, 1.0)
-        st.progress(cal_pct)
-        st.caption(f"{total_cals:.0f} / {goal_cals} kcal consumed")
-        
-        st.write("**🥩 Protein Progress**")
-        prot_pct = min(total_prot / goal_prot, 1.0)
-        st.progress(prot_pct)
-        st.caption(f"{total_prot:.1f}g / {goal_prot}g consumed")
-
-        st.write("")
-        st.markdown("---")
-        
-        # --- SMART DATA EDITOR ---
-        st.markdown("#### 📋 Meals Log")
-        st.caption("Tip: You can edit weights directly or delete a row by selecting it and clicking the trash icon.")
-        
-        # Display editable dataframe
-        edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True, hide_index=True)
-        
-        # Update session state if user deleted or edited a row
-        if not edited_df.equals(df):
-            st.session_state.daily_log = edited_df.to_dict('records')
-            st.rerun()
-            
-        st.write("")
-        if st.button("🗑️ Start a New Day (Clear All)", use_container_width=True):
-            st.session_state.daily_log = []
-            st.rerun()
-    else:
-        st.info("Your dashboard is empty. Go to the 'Search & Add' tab to log your first meal!")
+# ==========================================
+# TAB 4: CUSTOM FOODS (Recipe Builder)
+# ==========================================
+with tab_custom:
+    st.markdown("### Create Custom Food / Recipe")
+    st.caption("Add your own recipes or foods not found in the database. They will be saved to your local search.")
+    c_name = st.text_input("Food Name").lower()
+    c_cals = st.number_input("Calories per 100g", min_value=0.0)
+    c_prot = st.number_input("Protein per 100g", min_value=0.0)
+    c_carb = st.number_input("Carbs per 100g", min_value=0.0)
+    c_fat = st.number_input("Fat per 100g", min_value=0.0)
+    
+    if st.button("💾 Save Custom Food", type="primary"):
+        if c_name:
+            st.session_state.custom_foods[c_name] = {"cals": c_cals, "prot": c_prot, "carb": c_carb, "fat": c_fat}
+            st.success(f"{c_name.title()} added to your database!")

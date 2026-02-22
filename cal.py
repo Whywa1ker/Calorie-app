@@ -5,6 +5,7 @@ from PIL import Image, ImageEnhance
 from pyzbar.pyzbar import decode
 from deep_translator import GoogleTranslator
 import plotly.express as px
+import plotly.graph_objects as go
 import base64
 from datetime import date
 import json
@@ -80,7 +81,7 @@ def robust_global_search(en_query):
 
 def get_csv_download_link(df, filename="log.csv"):
     b64 = base64.b64encode(df.to_csv(index=False).encode()).decode()
-    return f'<a href="data:file/csv;base64,{b64}" download="{filename}" style="display:inline-block; padding:10px 20px; background-color:#2e66ff; color:white; text-align:center; font-weight:bold; text-decoration:none; border-radius:8px;">📥 Export Data</a>'
+    return f'<a href="data:file/csv;base64,{b64}" download="{filename}" style="display:inline-block; padding:10px 20px; background-color:#1f2937; color:white; text-align:center; font-weight:600; text-decoration:none; border-radius:6px;"><i class="fa-solid fa-download"></i> Export Data</a>'
 
 def calculate_targets(gender, age, weight, height, activity, goal):
     multipliers = {"Sedentary": 1.2, "Lightly active": 1.375, "Moderately active": 1.55, "Very active": 1.725, "Super active": 1.9}
@@ -94,8 +95,8 @@ def calculate_targets(gender, age, weight, height, activity, goal):
         
     prot, carb, fat = int((cals*p_pct)/4), int((cals*c_pct)/4), int((cals*f_pct)/9)
     
-    # Water calculation in Liters
     water_liters = (weight * 35) / 1000
+    if age > 55: water_liters = (weight * 30) / 1000 
     if "active" in activity.lower() and "lightly" not in activity.lower():
         water_liters += 0.75
     water_liters = round(water_liters, 1)
@@ -109,15 +110,22 @@ if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "Login"
 if 'verify_code_sent' not in st.session_state: st.session_state.verify_code_sent = False
 if 'temp_reg_data' not in st.session_state: st.session_state.temp_reg_data = {}
 
-# --- 4. UI Config & Base CSS ---
-st.set_page_config(page_title="MyFitness Pro", page_icon="⚡", layout="centered")
+# --- 4. UI Config & Base CSS (FontAwesome Injected) ---
+st.set_page_config(page_title="MyFitness Pro", page_icon="💪", layout="centered")
 st.markdown("""
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 6px 6px 0px 0px; padding: 10px 16px; }
-    .stTabs [aria-selected="true"] { background-color: #2e66ff; color: white !important; }
+    
+    /* Clean up the tabs - remove emojis and make them look like a sleek iOS app */
+    .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 2px solid #e5e7eb; }
+    .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0px 0px; padding: 12px 16px; color: #6b7280; font-weight: 500; }
+    .stTabs [aria-selected="true"] { background-color: #f3f4f6; color: #111827 !important; border-bottom: 3px solid #2e66ff; }
+    
+    .metric-icon { font-size: 1.2rem; margin-right: 8px; }
+    .app-title { text-align: center; color: #111827; font-weight: 800; font-size: 2.5rem; margin-bottom: 0px; }
+    .app-subtitle { text-align: center; color: #6b7280; font-weight: 400; font-size: 1rem; margin-top: -10px; margin-bottom: 30px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -125,15 +133,14 @@ st.markdown("""
 # AUTHENTICATION ROUTING
 # ==========================================
 if not st.session_state.logged_in:
-    st.markdown("<h1 style='text-align: center;'>⚡ MyFitness Pro</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center;'>Your Personal Nutrition & Fitness Tracker</p>", unsafe_allow_html=True)
-    st.write("")
+    st.markdown("<h1 class='app-title'><i class='fa-solid fa-bolt' style='color:#f59e0b;'></i> MyFitness Pro</h1>", unsafe_allow_html=True)
+    st.markdown("<p class='app-subtitle'>Professional Nutrition & Fitness Tracking</p>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1,2,1])
     with col2:
         with st.container(border=True):
             if st.session_state.auth_mode == "Login":
-                st.markdown("### 🔐 Login")
+                st.markdown("### <i class='fa-solid fa-lock' style='color:#6b7280;'></i> Login", unsafe_allow_html=True)
                 log_email = st.text_input("Email").lower().strip()
                 log_pass = st.text_input("Password", type="password")
                 
@@ -142,8 +149,7 @@ if not st.session_state.logged_in:
                         st.session_state.logged_in = True
                         st.session_state.current_user = log_email
                         st.rerun()
-                    else:
-                        st.error("Invalid email or password.")
+                    else: st.error("Invalid email or password.")
                 
                 st.write("")
                 st.write("Don't have an account?")
@@ -152,26 +158,21 @@ if not st.session_state.logged_in:
                     st.rerun()
                     
             elif st.session_state.auth_mode == "Register":
-                st.markdown("### 📝 Register")
+                st.markdown("### <i class='fa-solid fa-user-plus' style='color:#6b7280;'></i> Register", unsafe_allow_html=True)
                 
                 if not st.session_state.verify_code_sent:
                     reg_email = st.text_input("Email").lower().strip()
                     reg_pass = st.text_input("Password", type="password")
                     
                     if st.button("Send Verification Code", type="primary", use_container_width=True):
-                        if reg_email in db["users"]:
-                            st.error("Account already exists!")
+                        if reg_email in db["users"]: st.error("Account already exists!")
                         elif reg_email and len(reg_pass) >= 4:
                             st.session_state.temp_reg_data = {"email": reg_email, "pass": reg_pass}
-                            st.session_state.verify_code_sent = True
-                            st.rerun()
-                        else:
-                            st.error("Please enter a valid email and a password (min 4 chars).")
+                            st.session_state.verify_code_sent = True; st.rerun()
+                        else: st.error("Please enter a valid email and a password (min 4 chars).")
                             
                     st.write("")
-                    if st.button("Back to Login"):
-                        st.session_state.auth_mode = "Login"
-                        st.rerun()
+                    if st.button("Back to Login"): st.session_state.auth_mode = "Login"; st.rerun()
                 else:
                     st.success(f"Code sent to {st.session_state.temp_reg_data['email']}!")
                     st.info("*(Mock Mode: Enter '1234' to verify)*")
@@ -181,54 +182,41 @@ if not st.session_state.logged_in:
                         if v_code == "1234":
                             new_email = st.session_state.temp_reg_data["email"]
                             db["users"][new_email] = {
-                                "password": st.session_state.temp_reg_data["pass"],
-                                "onboarding_done": False,
-                                "profile": {},
-                                "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0
+                                "password": st.session_state.temp_reg_data["pass"], "onboarding_done": False,
+                                "profile": {}, "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0
                             }
                             sync_db()
-                            st.session_state.logged_in = True
-                            st.session_state.current_user = new_email
-                            st.session_state.verify_code_sent = False
-                            st.rerun()
-                        else:
-                            st.error("Invalid code.")
-                    if st.button("Cancel Registration"):
-                        st.session_state.verify_code_sent = False
-                        st.session_state.auth_mode = "Login"
-                        st.rerun()
+                            st.session_state.logged_in = True; st.session_state.current_user = new_email; st.session_state.verify_code_sent = False; st.rerun()
+                        else: st.error("Invalid code.")
+                    if st.button("Cancel Registration"): st.session_state.verify_code_sent = False; st.session_state.auth_mode = "Login"; st.rerun()
 
 # ==========================================
-# APP ROUTING (ONBOARDING vs MAIN DASHBOARD)
+# APP ROUTING
 # ==========================================
 else:
     user_data = db["users"][st.session_state.current_user]
-    
-    # Ensure water_liters exists in older user profiles
-    if "water_liters" not in user_data:
-        user_data["water_liters"] = 0.0
+    if "water_liters" not in user_data: user_data["water_liters"] = 0.0
     
     # --- ONBOARDING FLOW ---
     if not user_data.get("onboarding_done", False):
-        st.markdown("<h2 style='text-align: center;'>Welcome to MyFitness Pro! 🎉</h2>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center;'>Let's set up your personal profile to calculate your exact targets.</p>", unsafe_allow_html=True)
+        st.markdown("<h2 style='text-align: center;'><i class='fa-solid fa-hand-wave'></i> Welcome to MyFitness Pro!</h2>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center;'>Let's set up your personal profile.</p>", unsafe_allow_html=True)
         
         with st.container(border=True):
-            st.markdown("#### Physical Details")
+            st.markdown("#### <i class='fa-solid fa-id-card' style='color:#6b7280;'></i> Physical Details", unsafe_allow_html=True)
             col1, col2 = st.columns(2)
             gen = col1.selectbox("Gender", ["Male", "Female"])
             age = col2.number_input("Age", min_value=10, max_value=100, value=21)
             weight = col1.number_input("Current Weight (kg)", min_value=30.0, max_value=200.0, value=75.0, step=0.5)
             height = col2.number_input("Height (cm)", min_value=100.0, max_value=250.0, value=175.0, step=1.0)
             
-            st.markdown("#### Lifestyle & Goals")
+            st.markdown("#### <i class='fa-solid fa-bullseye' style='color:#6b7280;'></i> Lifestyle & Goals", unsafe_allow_html=True)
             act = st.selectbox("Daily Activity Level", ["Sedentary", "Lightly active", "Moderately active", "Very active", "Super active"])
             goal = st.selectbox("Current Goal", ["Weight Loss (Cut)", "Maintenance", "Lean Muscle Gain", "Bodybuilding (Bulk)"])
             
             st.write("")
-            if st.button("Calculate My Plan 🚀", type="primary", use_container_width=True):
+            if st.button("Calculate My Plan", type="primary", use_container_width=True):
                 cals, prot, carb, fat, water = calculate_targets(gen, age, weight, height, act, goal)
-                
                 user_data["profile"] = {
                     "gender": gen, "age": age, "height": height, "activity": act, "goal": goal,
                     "targets": {"cals": cals, "prot": prot, "carb": carb, "fat": fat, "water": water}
@@ -236,9 +224,8 @@ else:
                 user_data["weight_log"] = [{"Date": str(date.today()), "Weight": weight}]
                 user_data["onboarding_done"] = True
                 sync_db()
-                
                 st.success("Profile Setup Complete!")
-                st.info("🔒 **Privacy Notice:** All physical data and goals entered are for your personal tracking only and will not be distributed. You can always adjust these settings in the app.")
+                st.info("Privacy Notice: All data is local and private.")
                 st.button("Enter Dashboard", on_click=lambda: st.rerun())
 
     # --- MAIN APP FLOW ---
@@ -247,47 +234,48 @@ else:
         targets = profile["targets"]
         COMBINED_DB = {**OFFLINE_DB, **user_data.get("custom_foods", {})}
         current_weight = sorted(user_data["weight_log"], key=lambda x: x["Date"])[-1]["Weight"] if user_data["weight_log"] else 75.0
+        recommended_water = calculate_targets(profile["gender"], profile["age"], current_weight, profile["height"], profile["activity"], profile["goal"])[4]
 
         # --- SIDEBAR ---
         with st.sidebar:
-            st.markdown(f"👤 **{st.session_state.current_user.split('@')[0]}**")
-            if st.button("🚪 Logout"):
-                st.session_state.logged_in = False
-                st.session_state.current_user = None
-                st.rerun()
+            st.markdown(f"**<i class='fa-solid fa-user'></i> {st.session_state.current_user.split('@')[0]}**", unsafe_allow_html=True)
+            if st.button("Logout"):
+                st.session_state.logged_in = False; st.session_state.current_user = None; st.rerun()
                 
             st.markdown("---")
-            st.header("⚙️ Target Override")
-            st.caption("Auto-calculated from your profile. Edit manually if needed.")
-            
+            st.markdown("### <i class='fa-solid fa-sliders' style='color:#6b7280;'></i> Targets", unsafe_allow_html=True)
             t_cals = st.number_input("Calories", value=targets["cals"], step=50)
             t_prot = st.number_input("Protein (g)", value=targets["prot"], step=5)
             t_carb = st.number_input("Carbs (g)", value=targets["carb"], step=5)
             t_fat = st.number_input("Fat (g)", value=targets["fat"], step=5)
-            t_water = st.number_input("Water Goal (Liters)", value=float(targets["water"]), step=0.5)
             
-            if t_cals != targets["cals"] or t_prot != targets["prot"] or t_carb != targets["carb"] or t_fat != targets["fat"] or t_water != targets["water"]:
-                user_data["profile"]["targets"] = {"cals": t_cals, "prot": t_prot, "carb": t_carb, "fat": t_fat, "water": t_water}
+            if t_cals != targets["cals"] or t_prot != targets["prot"] or t_carb != targets["carb"] or t_fat != targets["fat"]:
+                user_data["profile"]["targets"]["cals"] = t_cals
+                user_data["profile"]["targets"]["prot"] = t_prot
+                user_data["profile"]["targets"]["carb"] = t_carb
+                user_data["profile"]["targets"]["fat"] = t_fat
                 sync_db()
 
             st.markdown("---")
-            st.header("💧 Hydration (Liters)")
+            st.markdown("### <i class='fa-solid fa-glass-water' style='color:#38bdf8;'></i> Hydration", unsafe_allow_html=True)
+            st.caption(f"Recommended: {recommended_water} L")
+            
+            t_water = st.number_input("Goal (Liters):", value=float(targets.get("water", recommended_water)), step=0.25)
+            if t_water != targets.get("water"):
+                user_data["profile"]["targets"]["water"] = t_water; sync_db()
+
             w_col1, w_col2, w_col3 = st.columns([1,1,1])
-            if w_col1.button("➖ 0.25L"): 
-                user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25)
-                sync_db()
+            if w_col1.button("- 0.25L"): user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25); sync_db()
             w_col2.markdown(f"<h3 style='text-align:center;'>{user_data.get('water_liters', 0.0):.2f}L</h3>", unsafe_allow_html=True)
-            if w_col3.button("➕ 0.25L"): 
-                user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25
-                sync_db()
-                
+            if w_col3.button("+ 0.25L"): user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25; sync_db()
             st.progress(min(user_data.get("water_liters", 0.0) / t_water, 1.0) if t_water > 0 else 0)
 
         # --- MAIN DASHBOARD ---
-        st.markdown("<h1 style='text-align: center;'>⚡ MyFitness Pro</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 class='app-title'><i class='fa-solid fa-bolt' style='color:#f59e0b;'></i> MyFitness Pro</h1>", unsafe_allow_html=True)
         st.write("")
 
-        tab_dash, tab_add_food, tab_exercise, tab_weight, tab_custom = st.tabs(["📊 Diary", "🥑 Add Food", "🏃‍♂️ Exercise", "⚖️ Weight", "⚙️ Custom"])
+        # Clean Tabs without Emojis
+        tab_dash, tab_add_food, tab_exercise, tab_weight, tab_custom = st.tabs(["Dashboard", "Add Food", "Exercise", "Weight", "Custom"])
 
         # TAB 1: DIARY
         with tab_dash:
@@ -301,27 +289,42 @@ else:
             cals_remaining = t_cals - net_cals
 
             with st.container(border=True):
-                st.markdown("### ⚖️ Energy Balance")
+                st.markdown("### <i class='fa-solid fa-scale-balanced' style='color:#8b5cf6;'></i> Energy Balance", unsafe_allow_html=True)
                 eq1, eq2, eq3, eq4, eq5, eq6, eq7 = st.columns([2,1,2,1,2,1,2])
                 eq1.metric("Goal", f"{t_cals}")
-                eq2.markdown("<h2 style='text-align:center;'>-</h2>", unsafe_allow_html=True)
+                eq2.markdown("<h2 style='text-align:center; color:#9ca3af;'>-</h2>", unsafe_allow_html=True)
                 eq3.metric("Food", f"{tot_food_cals:.0f}")
-                eq4.markdown("<h2 style='text-align:center;'>+</h2>", unsafe_allow_html=True)
+                eq4.markdown("<h2 style='text-align:center; color:#9ca3af;'>+</h2>", unsafe_allow_html=True)
                 eq5.metric("Burned", f"{tot_burned:.0f}")
-                eq6.markdown("<h2 style='text-align:center;'>=</h2>", unsafe_allow_html=True)
-                eq7.metric("Remaining", f"{cals_remaining:.0f}")
+                eq6.markdown("<h2 style='text-align:center; color:#9ca3af;'>=</h2>", unsafe_allow_html=True)
+                
+                if cals_remaining >= 0: eq7.metric("Remaining", f"{cals_remaining:.0f}")
+                else: eq7.metric("Remaining", f"Over {abs(cals_remaining):.0f}")
+                    
                 st.progress(min(net_cals / t_cals, 1.0) if t_cals > 0 else 0)
             
             if not df_food.empty:
                 st.write("")
-                col_m, col_p = st.columns([1, 1])
+                col_m, col_p = st.columns([1.2, 1])
                 with col_m:
-                    st.markdown("### 🥩 Macros")
-                    st.caption(f"**Pro:** {tot_prot:.0f}g / {t_prot}g")
+                    st.markdown("### <i class='fa-solid fa-chart-pie' style='color:#ec4899;'></i> Macros Status", unsafe_allow_html=True)
+                    
+                    diff_prot = t_prot - tot_prot
+                    if diff_prot >= 0: prot_str = f"<span style='color:#EF553B;'>**{diff_prot:.0f}g left**</span>"
+                    else: prot_str = f"<span style='color:#dc2626; font-weight:bold;'><i class='fa-solid fa-circle-exclamation'></i> Over by {abs(diff_prot):.0f}g</span>"
+                    st.markdown(f"**Protein:** {tot_prot:.0f}g / {t_prot}g | {prot_str}", unsafe_allow_html=True)
                     st.progress(min(tot_prot / t_prot, 1.0) if t_prot > 0 else 0)
-                    st.caption(f"**Carb:** {tot_carb:.0f}g / {t_carb}g")
+                    
+                    diff_carb = t_carb - tot_carb
+                    if diff_carb >= 0: carb_str = f"<span style='color:#636EFA;'>**{diff_carb:.0f}g left**</span>"
+                    else: carb_str = f"<span style='color:#dc2626; font-weight:bold;'><i class='fa-solid fa-circle-exclamation'></i> Over by {abs(diff_carb):.0f}g</span>"
+                    st.markdown(f"**Carbs:** {tot_carb:.0f}g / {t_carb}g | {carb_str}", unsafe_allow_html=True)
                     st.progress(min(tot_carb / t_carb, 1.0) if t_carb > 0 else 0)
-                    st.caption(f"**Fat:** {tot_fat:.0f}g / {t_fat}g")
+                    
+                    diff_fat = t_fat - tot_fat
+                    if diff_fat >= 0: fat_str = f"<span style='color:#00CC96;'>**{diff_fat:.0f}g left**</span>"
+                    else: fat_str = f"<span style='color:#dc2626; font-weight:bold;'><i class='fa-solid fa-circle-exclamation'></i> Over by {abs(diff_fat):.0f}g</span>"
+                    st.markdown(f"**Fat:** {tot_fat:.0f}g / {t_fat}g | {fat_str}", unsafe_allow_html=True)
                     st.progress(min(tot_fat / t_fat, 1.0) if t_fat > 0 else 0)
                     
                 with col_p:
@@ -330,11 +333,11 @@ else:
                     st.plotly_chart(fig, use_container_width=True)
 
                 st.markdown("---")
-                st.markdown("### 🍽️ Meals Diary")
+                st.markdown("### <i class='fa-solid fa-book-open' style='color:#14b8a6;'></i> Meals Diary", unsafe_allow_html=True)
                 for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"]:
                     meal_data = df_food[df_food["Meal"] == meal] if not df_food.empty else pd.DataFrame()
                     meal_cals = meal_data["Calories"].sum() if not meal_data.empty else 0
-                    with st.expander(f"**{meal}** |  {meal_cals:.0f} kcal"):
+                    with st.expander(f"{meal} | {meal_cals:.0f} kcal"):
                         if not meal_data.empty:
                             edited_df = st.data_editor(meal_data.drop(columns=["Meal"]), hide_index=True, use_container_width=True, key=f"edit_{meal}")
                             if not edited_df.equals(meal_data.drop(columns=["Meal"])):
@@ -345,16 +348,16 @@ else:
 
                 st.write("")
                 st.markdown(get_csv_download_link(df_food, "diary.csv"), unsafe_allow_html=True)
-                if st.button("🗑️ Reset Entire Day", use_container_width=True):
+                if st.button("Reset Entire Day", use_container_width=True):
                     user_data["daily_log"] = []; user_data["exercise_log"] = []; user_data["water_liters"] = 0.0
                     sync_db(); st.rerun()
 
         # TAB 2: ADD FOOD
         with tab_add_food:
-            st.markdown("### 🔍 Find & Log")
+            st.markdown("### <i class='fa-solid fa-magnifying-glass' style='color:#636EFA;'></i> Find & Log Food", unsafe_allow_html=True)
             selected_meal = st.radio("Select Meal:", ["Breakfast", "Lunch", "Dinner", "Snacks"], horizontal=True)
             
-            with st.expander("📷 Open Camera Scanner", expanded=False):
+            with st.expander("Open Camera Scanner", expanded=False):
                 camera_photo = st.camera_input("Barcode Scanner", label_visibility="collapsed")
             
             scanned_barcode = ""
@@ -364,7 +367,7 @@ else:
                 if not decoded: decoded = decode(ImageEnhance.Contrast(image.convert('L')).enhance(3.0))
                 if decoded:
                     scanned_barcode = decoded[0].data.decode("utf-8")
-                    st.success(f"Barcode: {scanned_barcode}")
+                    st.success(f"Barcode Detected: {scanned_barcode}")
                 else: st.error("Barcode not read.")
 
             search_input = st.text_input("Search or Scan Barcode:", value=scanned_barcode, placeholder="Type anything...")
@@ -402,13 +405,13 @@ else:
 
                 if found:
                     with st.container(border=True):
-                        st.markdown(f"#### 🍽️ {p_name}")
+                        st.markdown(f"#### {p_name}")
                         st.caption(f"100g ➔ {c_100} kcal | {p_100}g P")
-                        f_weight = st.number_input("⚖️ Amount (g):", min_value=1.0, value=100.0, step=10.0)
+                        f_weight = st.number_input("Amount (g):", min_value=1.0, value=100.0, step=10.0)
                         cur_c, cur_p, cur_ch, cur_f = (c_100*f_weight)/100, (p_100*f_weight)/100, (ch_100*f_weight)/100, (f_100*f_weight)/100
                         st.success(f"**Total: {cur_c:.0f} kcal**")
                         
-                        if st.button(f"➕ Add to {selected_meal}", type="primary", use_container_width=True):
+                        if st.button(f"Add to {selected_meal}", type="primary", use_container_width=True):
                             user_data["daily_log"].append({
                                 "Meal": selected_meal, "Food": p_name, "Grams": f_weight, 
                                 "Calories": round(cur_c, 1), "Protein": round(cur_p, 1), "Carbs": round(cur_ch, 1), "Fat": round(cur_f, 1)
@@ -417,7 +420,7 @@ else:
 
         # TAB 3: EXERCISE
         with tab_exercise:
-            st.markdown("### 🏃‍♂️ Scientific Calorie Burner")
+            st.markdown("### <i class='fa-solid fa-person-running' style='color:#f97316;'></i> Scientific Calorie Burner", unsafe_allow_html=True)
             sel_ex = st.selectbox("Select Activity:", list(EXERCISE_METS.keys()))
             if sel_ex == "Custom (Manual Input)":
                 ex_name = st.text_input("Custom Exercise Name:")
@@ -428,7 +431,7 @@ else:
                 f_cals_burned = int((EXERCISE_METS[sel_ex] * 3.5 * current_weight) / 200 * dur_min)
                 st.info(f"💡 Approx. burned: **{f_cals_burned} kcal**.")
 
-            if st.button("➕ Log Workout", type="primary", use_container_width=True):
+            if st.button("Log Workout", type="primary", use_container_width=True):
                 if ex_name and f_cals_burned > 0:
                     user_data["exercise_log"].append({"Exercise": ex_name, "Burned": f_cals_burned})
                     sync_db(); st.success("Logged!"); st.rerun()
@@ -436,12 +439,12 @@ else:
 
         # TAB 4: WEIGHT TRACKER
         with tab_weight:
-            st.markdown("### 📈 Body Weight Progress")
+            st.markdown("### <i class='fa-solid fa-chart-line' style='color:#2e66ff;'></i> Body Weight Progress", unsafe_allow_html=True)
             with st.container(border=True):
                 w_col1, w_col2 = st.columns(2)
                 log_date = w_col1.date_input("Date", value=date.today())
                 log_weight = w_col2.number_input("Weight (kg)", min_value=30.0, max_value=250.0, value=float(current_weight), step=0.1)
-                if st.button("💾 Save Weight", type="primary", use_container_width=True):
+                if st.button("Save Weight", type="primary", use_container_width=True):
                     date_str = str(log_date)
                     user_data["weight_log"] = [e for e in user_data["weight_log"] if e["Date"] != date_str]
                     user_data["weight_log"].append({"Date": date_str, "Weight": log_weight})
@@ -450,25 +453,44 @@ else:
 
             if len(user_data["weight_log"]) > 0:
                 df_w = pd.DataFrame(user_data["weight_log"])
-                fig_w = px.line(df_w, x="Date", y="Weight", markers=True, text="Weight")
-                fig_w.update_traces(textposition="top center", line_color="#2e66ff", marker=dict(size=8))
-                fig_w.update_layout(margin=dict(t=20, b=0, l=0, r=0), yaxis_title="Kg", xaxis_title="")
+                df_w['Date'] = pd.to_datetime(df_w['Date'])
+                
+                start_date = df_w['Date'].iloc[0]
+                start_weight = df_w['Weight'].iloc[0]
+                goal = profile.get("goal", "Maintenance")
+                
+                if goal == "Weight Loss (Cut)": daily_rate = -0.5 / 7
+                elif goal == "Lean Muscle Gain": daily_rate = 0.25 / 7
+                elif goal == "Bodybuilding (Bulk)": daily_rate = 0.5 / 7
+                else: daily_rate = 0.0
+                
+                df_w['Days Passed'] = (df_w['Date'] - start_date).dt.days
+                df_w['Ideal Goal'] = start_weight + (df_w['Days Passed'] * daily_rate)
+                
+                fig_w = go.Figure()
+                fig_w.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Weight'], mode='lines+markers+text', name='Actual Weight', text=df_w['Weight'], textposition="top center", line=dict(color='#2e66ff', width=3), marker=dict(size=8)))
+                fig_w.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Ideal Goal'], mode='lines', name='Ideal Target', line=dict(color='#00CC96', width=2, dash='dash')))
+                
+                fig_w.update_layout(margin=dict(t=30, b=0, l=0, r=0), yaxis_title="Kg", xaxis_title="", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig_w, use_container_width=True)
                 
-                edited_w = st.data_editor(df_w, num_rows="dynamic", use_container_width=True, hide_index=True)
-                if not edited_w.equals(df_w):
+                df_w['Date'] = df_w['Date'].dt.strftime('%Y-%m-%d')
+                df_w_display = df_w[['Date', 'Weight']] 
+                
+                edited_w = st.data_editor(df_w_display, num_rows="dynamic", use_container_width=True, hide_index=True)
+                if not edited_w.equals(df_w_display):
                     user_data["weight_log"] = edited_w.to_dict('records')
                     sync_db(); st.rerun()
 
         # TAB 5: CUSTOM RECIPES
         with tab_custom:
-            st.markdown("### 👨‍🍳 Recipe Builder")
+            st.markdown("### <i class='fa-solid fa-utensils' style='color:#ef4444;'></i> Recipe Builder", unsafe_allow_html=True)
             c_name = st.text_input("Food Name").lower()
             c_cals = st.number_input("Cals / 100g", min_value=0.0)
             c_prot = st.number_input("Protein / 100g", min_value=0.0)
             c_carb = st.number_input("Carbs / 100g", min_value=0.0)
             c_fat = st.number_input("Fat / 100g", min_value=0.0)
-            if st.button("💾 Save Database", type="primary"):
+            if st.button("Save Database", type="primary"):
                 if c_name:
                     if "custom_foods" not in user_data: user_data["custom_foods"] = {}
                     user_data["custom_foods"][c_name] = {"cals": c_cals, "prot": c_prot, "carb": c_carb, "fat": c_fat}

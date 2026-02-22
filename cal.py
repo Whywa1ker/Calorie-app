@@ -1,102 +1,97 @@
 import streamlit as st
 import pandas as pd
-import json
-import os
+import requests
 
-# --- Configuration ---
-DATA_FILE = "fitness_db.json"
+# --- API Configuration ---
+# We use Open Food Facts API (Free and Open Source)
+SEARCH_URL = "https://world.openfoodfacts.org/cgi/search.pl"
 
-DEFAULT_FOODS = {
-    "milk 3%": {"calories": 60, "protein": 3.2},
-    "chicken breast": {"calories": 165, "protein": 31.0},
-    "egg": {"calories": 155, "protein": 13.0},
-    "cooked rice": {"calories": 130, "protein": 2.7},
-    "oats": {"calories": 389, "protein": 16.9},
-    "cottage cheese 5%": {"calories": 95, "protein": 11.0}
-}
+def search_food(query):
+    """Searches the Open Food Facts database for a specific product."""
+    params = {
+        "action": "process",
+        "tagtype_0": "categories",
+        "tag_contains_0": "contains",
+        "tag_0": query,
+        "json": "True",
+        "page_size": 10,
+        "fields": "product_name,nutriments,brands"
+    }
+    response = requests.get(SEARCH_URL, params=params)
+    if response.status_code == 200:
+        return response.json().get("products", [])
+    return []
 
-# Initialize the daily log in session state if it doesn't exist
 if 'daily_log' not in st.session_state:
     st.session_state.daily_log = []
 
-def load_data():
-    if os.path.exists(DATA_FILE):
-        try:
-            with open(DATA_FILE, "r") as f:
-                return json.load(f)
-        except:
-            return DEFAULT_FOODS
-    return DEFAULT_FOODS
-
-def save_data(data):
-    with open(DATA_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-food_db = load_data()
-
 # --- UI Setup ---
-st.set_page_config(page_title="Fitness Calculator", page_icon="⚖️")
-st.title("Daily Food Tracker")
+st.set_page_config(page_title="Smart Fitness Tracker", page_icon="🥗")
+st.title("Auto-Search Nutrition Tracker")
 
-# Sidebar - Add new food to DB
-st.sidebar.header("Settings")
-with st.sidebar.expander("Add New Food to Database"):
-    new_name = st.text_input("Food Name").lower().strip()
-    new_cals = st.number_input("Cals per 100g", min_value=0.0)
-    new_protein = st.number_input("Protein per 100g", min_value=0.0)
-    if st.button("Save to DB"):
-        if new_name:
-            food_db[new_name] = {"calories": new_cals, "protein": new_protein}
-            save_data(food_db)
-            st.success(f"Added {new_name}!")
-            st.rerun()
-
-# --- Main Calculator ---
-st.header("1. Calculate & Add Meal")
-options = sorted(list(food_db.keys()))
-selected_food = st.selectbox("Select Food", options=options)
-weight = st.number_input("Weight (grams)", min_value=0.1, value=100.0, step=1.0)
-
-base_data = food_db[selected_food]
-current_cals = (base_data['calories'] * weight) / 100
-current_protein = (base_data['protein'] * weight) / 100
-
-st.write(f"**Current selection:** {current_cals:.1f} kcal | {current_protein:.1f}g Protein")
-
-if st.button("Add to Daily Log ➕"):
-    # Add to the session state list
-    entry = {
-        "Food": selected_food,
-        "Grams": weight,
-        "Calories": round(current_cals, 1),
-        "Protein": round(current_protein, 1)
-    }
-    st.session_state.daily_log.append(entry)
-    st.success(f"Added {selected_food} to your log!")
-
-# --- Daily Log Display ---
 st.markdown("---")
-st.header("2. Today's Food Log")
+
+# --- Step 1: Search ---
+st.header("1. Search Global Database")
+search_query = st.text_input("Enter product name (e.g., 'Cottage Cheese', 'Bamba'):")
+
+if search_query:
+    results = search_food(search_query)
+    
+    if results:
+        # Create a list for the dropdown
+        options = {f"{p.get('product_name')} ({p.get('brands', 'Unknown')})": p for p in results}
+        selection = st.selectbox("Select the exact product:", list(options.keys()))
+        
+        if selection:
+            product = options[selection]
+            nutrients = product.get("nutriments", {})
+            
+            # Extract values per 100g (defaulting to 0 if not found)
+            cals_100g = nutrients.get("energy-kcal_100g", 0)
+            prot_100g = nutrients.get("proteins_100g", 0)
+            carb_100g = nutrients.get("carbohydrates_100g", 0)
+            fat_100g = nutrients.get("fat_100g", 0)
+            
+            st.write(f"**Values per 100g:** {cals_100g} kcal | P: {prot_100g}g | C: {carb_100g}g | F: {fat_100g}g")
+            
+            # --- Step 2: Calculate ---
+            weight = st.number_input("How many grams did you eat?", min_value=1.0, value=100.0)
+            
+            final_cals = (cals_100g * weight) / 100
+            final_prot = (prot_100g * weight) / 100
+            final_carb = (carb_100g * weight) / 100
+            final_fat = (fat_100g * weight) / 100
+            
+            st.success(f"**Total:** {final_cals:.1f} kcal | P: {final_prot:.1f}g | C: {final_carb:.1f}g | F: {final_fat:.1f}g")
+            
+            if st.button("Add to Daily Log ➕"):
+                st.session_state.daily_log.append({
+                    "Food": selection,
+                    "Grams": weight,
+                    "Calories": round(final_cals, 1),
+                    "Protein": round(final_prot, 1),
+                    "Carbs": round(final_carb, 1),
+                    "Fat": round(final_fat, 1)
+                })
+                st.rerun()
+    else:
+        st.warning("No products found. Try a different name.")
+
+# --- Step 3: Daily Summary ---
+st.markdown("---")
+st.header("2. Today's Totals")
 
 if st.session_state.daily_log:
-    log_df = pd.DataFrame(st.session_state.daily_log)
-    st.table(log_df)
+    df = pd.DataFrame(st.session_state.daily_log)
+    st.dataframe(df, use_container_width=True)
     
-    # Calculate Totals
-    total_cals = log_df["Calories"].sum()
-    total_protein = log_df["Protein"].sum()
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Calories", f"{df['Calories'].sum():.1f}")
+    col2.metric("Protein", f"{df['Protein'].sum():.1f}g")
+    col3.metric("Carbs", f"{df['Carbs'].sum():.1f}g")
+    col4.metric("Fat", f"{df['Fat'].sum():.1f}g")
     
-    st.subheader("Daily Totals:")
-    col1, col2 = st.columns(2)
-    col1.metric("Total Calories", f"{total_cals:.1f} kcal")
-    col2.metric("Total Protein", f"{total_protein:.1f}g")
-    
-    if st.button("Clear Log 🗑️"):
+    if st.button("Clear Log"):
         st.session_state.daily_log = []
         st.rerun()
-else:
-    st.info("Your daily log is empty. Add a meal above!")
-
-# Show DB Checkbox
-if st.checkbox("Show Full Database"):
-    st.write(pd.DataFrame.from_dict(food_db, orient='index'))

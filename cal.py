@@ -182,11 +182,9 @@ else:
         profile = user_data["profile"]
         targets = profile["targets"]
         
-        # --- FIX FOR LINE 236 ERROR ---
         # Safeguard: if weight_log is empty, fallback to 75.0
         if user_data.get("weight_log"):
             try:
-                # Sort safely and get the last Weight value
                 log_sorted = sorted(user_data["weight_log"], key=lambda x: x["Date"])
                 current_weight = log_sorted[-1]["Weight"]
             except (KeyError, IndexError):
@@ -198,7 +196,8 @@ else:
 
         with st.sidebar:
             st.markdown(f"**<i class='fa-solid fa-user'></i> {st.session_state.current_user.split('@')[0]}**", unsafe_allow_html=True)
-            if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
+            if st.button("Logout"):
+                st.session_state.logged_in = False; st.rerun()
             st.markdown("---")
             t_cals = st.number_input("Calories", value=targets["cals"], step=50)
             t_prot = st.number_input("Protein", value=targets["prot"], step=5)
@@ -293,7 +292,7 @@ else:
                     with st.container(border=True):
                         st.markdown(f"#### {name}")
                         w = st.number_input("Grams:", min_value=1.0, value=100.0, step=10.0)
-                        cv, pv, chv, fv = (c100*w)/100, (p100*w)/100, (ch100*w)/100, (f100*w)/100
+                        cv, pv, chv, fv = (c100*w)/100, (p100*w)/100, (ch100*w)/100, (f_100*w)/100
                         st.success(f"Total: {cv:.0f} kcal")
                         if st.button(f"Add to {meal}", type="primary", use_container_width=True):
                             user_data["daily_log"].append({"Meal": meal, "Food": name, "Grams": w, "Calories": round(cv, 1), "Protein": round(pv, 1), "Carbs": round(chv, 1), "Fat": round(fv, 1)})
@@ -314,33 +313,53 @@ else:
 
         with t_weight:
             st.markdown("### <i class='fa-solid fa-chart-line'></i> Weight Tracker", unsafe_allow_html=True)
+            
+            # --- Input Area ---
             with st.container(border=True):
                 wc1, wc2 = st.columns(2)
-                ld, lw = wc1.date_input("Date", value=date.today()), wc2.number_input("Kg", min_value=30.0, value=float(current_weight))
-                if st.button("Save", type="primary", use_container_width=True):
+                ld, lw = wc1.date_input("Entry Date", value=date.today()), wc2.number_input("Weight (Kg)", min_value=30.0, value=float(current_weight))
+                if st.button("Save Entry", type="primary", use_container_width=True):
                     ds = str(ld)
+                    # Filter out existing date to allow override
                     user_data["weight_log"] = [e for e in user_data["weight_log"] if e["Date"] != ds]
                     user_data["weight_log"].append({"Date": ds, "Weight": lw})
                     user_data["weight_log"] = sorted(user_data["weight_log"], key=lambda x: x["Date"])
                     sync_db(); st.rerun()
+
             if user_data["weight_log"]:
                 df_w = pd.DataFrame(user_data["weight_log"])
                 df_w['Date'] = pd.to_datetime(df_w['Date'])
+                
+                # --- Trend Calculations ---
                 sd, sw, g = df_w['Date'].iloc[0], df_w['Weight'].iloc[0], profile.get("goal")
-                dr = -0.07 if g == "Weight Loss (Cut)" else (0.03 if g == "Lean Muscle Gain" else (0.07 if g == "Bodybuilding (Bulk)" else 0))
+                dr = -0.07 if "Weight Loss" in g else (0.035 if "Muscle" in g else (0.07 if "Bodybuilding" in g else 0))
                 df_w['Days'] = (df_w['Date'] - sd).dt.days
                 df_w['Ideal'] = sw + (df_w['Days'] * dr)
+                
+                # --- Visual Chart (View Only) ---
                 fig_w = go.Figure()
                 fig_w.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Weight'], mode='lines+markers', name='Actual', line=dict(color='#2e66ff', width=3)))
-                fig_w.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Ideal'], mode='lines', name='Target', line=dict(color='#00CC96', dash='dash')))
-                fig_w.update_layout(height=300, margin=dict(t=0, b=0, l=0, r=0), legend=dict(orientation="h", y=1.1)); st.plotly_chart(fig_w, use_container_width=True)
-                ed_w = st.data_editor(df_w[['Date', 'Weight']].sort_values(by='Date', ascending=False), num_rows="dynamic", use_container_width=True, hide_index=True)
-                if not ed_w.equals(df_w[['Date', 'Weight']].sort_values(by='Date', ascending=False)):
-                    user_data["weight_log"] = ed_w.to_dict('records'); sync_db(); st.rerun()
+                fig_w.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Ideal'], mode='lines', name='Trend', line=dict(color='#00CC96', dash='dash')))
+                fig_w.update_layout(height=300, margin=dict(t=10, b=0, l=0, r=0), legend=dict(orientation="h", y=1.1))
+                st.plotly_chart(fig_w, use_container_width=True)
+
+                # --- READ ONLY TABLE (Safety Lock) ---
+                st.markdown("#### 📋 History (Read Only)")
+                # Formatting date to be clean string without time
+                display_df = df_w[['Date', 'Weight']].copy()
+                display_df['Date'] = display_df['Date'].dt.strftime('%Y-%m-%d')
+                st.dataframe(display_df.sort_values(by='Date', ascending=False), use_container_width=True, hide_index=True)
+                
+                if st.button("🗑️ Reset Weight Log (Careful!)"):
+                    user_data["weight_log"] = [{"Date": str(date.today()), "Weight": current_weight}]
+                    sync_db(); st.rerun()
 
         with t_custom:
             st.markdown("### <i class='fa-solid fa-utensils'></i> My Foods", unsafe_allow_html=True)
-            cn = st.text_input("Name:").lower()
-            cc, cp, cch, cf = st.number_input("Cals:"), st.number_input("Pro:"), st.number_input("Carb:"), st.number_input("Fat:")
+            cn = st.text_input("Food Name:").lower()
+            cc, cp, cch, cf = st.number_input("Calories:"), st.number_input("Protein:"), st.number_input("Carbs:"), st.number_input("Fat:")
             if st.button("Save to My Library"):
-                if cn: user_data["custom_foods"][cn] = {"cals":cc, "prot":cp, "carb":cch, "fat":cf}; sync_db(); st.success("Saved!")
+                if cn: 
+                    if "custom_foods" not in user_data: user_data["custom_foods"] = {}
+                    user_data["custom_foods"][cn] = {"cals":cc, "prot":cp, "carb":cch, "fat":cf}
+                    sync_db(); st.success(f"Saved {cn}!")

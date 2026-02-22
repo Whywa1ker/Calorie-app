@@ -23,7 +23,7 @@ OFFLINE_DB = {
     "bissli": {"cals": 490, "prot": 9.0, "carb": 60.0, "fat": 24.0}
 }
 
-# --- 2. Data Fetching & Translation Functions ---
+# --- 2. Data Fetching Functions ---
 @st.cache_data(show_spinner=False)
 def get_food_by_barcode(barcode):
     url = f"https://world.openfoodfacts.org/api/v0/product/{barcode}.json"
@@ -41,16 +41,12 @@ def get_food_by_barcode(barcode):
 def robust_search(query):
     results = []
     url = "https://world.openfoodfacts.org/cgi/search.pl"
-    
-    # Logic A: Search the exact input first (best for brands/local names)
     try:
         res = requests.get(url, params={"action": "process", "search_terms": query, "json": "True", "fields": "product_name,nutriments,brands"}, timeout=5)
         if res.status_code == 200:
             results.extend(res.json().get("products", []))
     except:
         pass
-        
-    # Logic B: Try translating to English as a fallback
     try:
         translated_query = GoogleTranslator(source='auto', target='en').translate(query)
         if translated_query.lower() != query.lower():
@@ -60,7 +56,6 @@ def robust_search(query):
     except:
         pass
         
-    # Remove duplicates
     seen = set()
     unique = []
     for p in results:
@@ -74,116 +69,142 @@ def robust_search(query):
 if 'daily_log' not in st.session_state:
     st.session_state.daily_log = []
 
-st.set_page_config(page_title="Global Tracker", page_icon="🌍")
-st.title("🌍 Multi-Language Tracker")
+# --- UI Setup ---
+st.set_page_config(page_title="Macro Tracker Pro", page_icon="🍏", layout="centered")
 
-# --- 3. Camera Barcode Scanner ---
-st.header("Step 1: Scan Barcode")
-camera_photo = st.camera_input("Take a picture of the barcode", label_visibility="collapsed")
-scanned_barcode = ""
+st.markdown("<h1 style='text-align: center;'>🍏 Macro Tracker Pro</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: gray;'>Scan, search, and track your daily nutrition effortlessly.</p>", unsafe_allow_html=True)
+st.write("")
 
-if camera_photo is not None:
-    image = Image.open(camera_photo)
-    decoded_objects = decode(image)
+# --- TABS FOR CLEAN UI ---
+tab_add, tab_log = st.tabs(["🔍 Add Food", "📊 My Daily Log"])
+
+with tab_add:
+    # 1. Expandable Camera Scanner
+    with st.expander("📷 Open Camera to Scan Barcode", expanded=False):
+        camera_photo = st.camera_input("Take a clear picture of the barcode", label_visibility="collapsed")
     
-    if not decoded_objects:
-        gray_image = image.convert('L')
-        enhancer = ImageEnhance.Contrast(gray_image)
-        enhanced_image = enhancer.enhance(3.0)
-        decoded_objects = decode(enhanced_image)
+    scanned_barcode = ""
+    if camera_photo is not None:
+        image = Image.open(camera_photo)
+        decoded_objects = decode(image)
+        if not decoded_objects:
+            gray_image = image.convert('L')
+            enhancer = ImageEnhance.Contrast(gray_image)
+            enhanced_image = enhancer.enhance(3.0)
+            decoded_objects = decode(enhanced_image)
 
-    if decoded_objects:
-        scanned_barcode = decoded_objects[0].data.decode("utf-8")
-        st.success(f"Barcode Found: {scanned_barcode}")
-    else:
-        st.error("Could not read barcode. Try to ensure good lighting.")
+        if decoded_objects:
+            scanned_barcode = decoded_objects[0].data.decode("utf-8")
+            st.success(f"Barcode Detected: {scanned_barcode}")
+        else:
+            st.error("Could not read barcode. Try again with better lighting.")
 
-# --- 4. Multi-Language Search & Auto-Fill ---
-search_input = st.text_input("Barcode or Food Name (Any Language):", value=scanned_barcode)
+    # 2. Search Box
+    st.markdown("### 🔎 Search Database")
+    search_input = st.text_input("Enter Barcode or Food Name (Any Language):", value=scanned_barcode, placeholder="e.g., Cottage cheese, לחם, Apple...")
 
-if search_input:
-    product_name = ""
-    cals_100 = prot_100 = carb_100 = fat_100 = 0
-    found = False
-    
-    if search_input.isdigit():
-        product = get_food_by_barcode(search_input)
-        if product:
-            product_name = f"{product.get('product_name', 'Unknown')} ({product.get('brands', 'Unknown')})"
-            nutrients = product.get('nutriments', {})
-            cals_100 = nutrients.get("energy-kcal_100g", 0)
-            prot_100 = nutrients.get("proteins_100g", 0)
-            carb_100 = nutrients.get("carbohydrates_100g", 0)
-            fat_100  = nutrients.get("fat_100g", 0)
-            found = True
-    else:
-        # Check Offline DB first
-        local_matches = [name for name in OFFLINE_DB.keys() if search_input.lower() in name.lower()]
+    if search_input:
+        product_name = ""
+        cals_100 = prot_100 = carb_100 = fat_100 = 0
+        found = False
         
-        if local_matches:
-            selected_local = st.selectbox("Found in local database:", local_matches)
-            if selected_local:
-                product_name = selected_local.title()
-                cals_100 = OFFLINE_DB[selected_local]["cals"]
-                prot_100 = OFFLINE_DB[selected_local]["prot"]
-                carb_100 = OFFLINE_DB[selected_local]["carb"]
-                fat_100  = OFFLINE_DB[selected_local]["fat"]
-                found = True
-        
-        if not found:
-            results = robust_search(search_input)
-            if results:
-                # Show top 10 options to give the user a good selection
-                options = {f"{p.get('product_name', 'Unknown')} ({p.get('brands', 'N/A')})": p for p in results[:10]}
-                selected_global = st.selectbox("Found in global database:", list(options.keys()))
-                if selected_global:
-                    product = options[selected_global]
-                    product_name = selected_global
+        with st.spinner("Searching..."):
+            if search_input.isdigit():
+                product = get_food_by_barcode(search_input)
+                if product:
+                    product_name = f"{product.get('product_name', 'Unknown')} ({product.get('brands', 'Unknown')})"
                     nutrients = product.get('nutriments', {})
                     cals_100 = nutrients.get("energy-kcal_100g", 0)
                     prot_100 = nutrients.get("proteins_100g", 0)
                     carb_100 = nutrients.get("carbohydrates_100g", 0)
                     fat_100  = nutrients.get("fat_100g", 0)
                     found = True
+            else:
+                local_matches = [name for name in OFFLINE_DB.keys() if search_input.lower() in name.lower()]
+                if local_matches:
+                    selected_local = st.selectbox("Select exact match:", local_matches)
+                    if selected_local:
+                        product_name = selected_local.title()
+                        cals_100 = OFFLINE_DB[selected_local]["cals"]
+                        prot_100 = OFFLINE_DB[selected_local]["prot"]
+                        carb_100 = OFFLINE_DB[selected_local]["carb"]
+                        fat_100  = OFFLINE_DB[selected_local]["fat"]
+                        found = True
+                
+                if not found:
+                    results = robust_search(search_input)
+                    if results:
+                        options = {f"{p.get('product_name', 'Unknown')} ({p.get('brands', 'N/A')})": p for p in results[:10]}
+                        selected_global = st.selectbox("Select exact match:", list(options.keys()))
+                        if selected_global:
+                            product = options[selected_global]
+                            product_name = selected_global
+                            nutrients = product.get('nutriments', {})
+                            cals_100 = nutrients.get("energy-kcal_100g", 0)
+                            prot_100 = nutrients.get("proteins_100g", 0)
+                            carb_100 = nutrients.get("carbohydrates_100g", 0)
+                            fat_100  = nutrients.get("fat_100g", 0)
+                            found = True
 
-    # --- 5. Instant Preview & Logging ---
-    if found:
-        st.markdown("---")
-        st.subheader("🔍 Product Preview")
-        st.markdown(f"**{product_name}**")
-        st.info(f"**Values per 100g:** {cals_100} kcal | P: {prot_100}g | C: {carb_100}g | F: {fat_100}g")
+        # 3. Dynamic Preview Card
+        if found:
+            st.write("")
+            with st.container(border=True):
+                st.markdown(f"#### 🍽️ {product_name}")
+                st.caption(f"Base values (100g): {cals_100} kcal | Protein: {prot_100}g | Carbs: {carb_100}g | Fat: {fat_100}g")
+                
+                weight = st.number_input("⚖️ Amount eaten (grams):", min_value=1.0, value=100.0, step=5.0)
+                
+                cur_c = (cals_100 * weight) / 100
+                cur_p = (prot_100 * weight) / 100
+                cur_ch = (carb_100 * weight) / 100
+                cur_f = (fat_100 * weight) / 100
+                
+                st.markdown("##### Total for this portion:")
+                p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+                p_col1.metric("Calories", f"{cur_c:.0f}")
+                p_col2.metric("Protein", f"{cur_p:.1f}g")
+                p_col3.metric("Carbs", f"{cur_ch:.1f}g")
+                p_col4.metric("Fat", f"{cur_f:.1f}g")
+                
+                st.write("")
+                if st.button("➕ Add to Daily Log", type="primary", use_container_width=True):
+                    st.session_state.daily_log.append({
+                        "Food": product_name, "Weight": weight, "Calories": round(cur_c, 1),
+                        "Protein": round(cur_p, 1), "Carbs": round(cur_ch, 1), "Fat": round(cur_f, 1)
+                    })
+                    st.success("Added! Check the 'My Daily Log' tab.")
+        else:
+            if search_input:
+                st.warning("Product not found. Try a different term or scan the barcode.")
+
+with tab_log:
+    st.markdown("### 📈 Today's Summary")
+    
+    if st.session_state.daily_log:
+        df = pd.DataFrame(st.session_state.daily_log)
         
-        weight = st.number_input("Grams eaten:", min_value=1.0, value=100.0, step=1.0)
+        # Dashboard Metrics
+        total_cals = df['Calories'].sum()
+        total_prot = df['Protein'].sum()
+        total_carb = df['Carbs'].sum()
+        total_fat = df['Fat'].sum()
+
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("🔥 Calories", f"{total_cals:.0f}")
+        m_col2.metric("🥩 Protein", f"{total_prot:.1f}g")
+        m_col3.metric("🍞 Carbs", f"{total_carb:.1f}g")
+        m_col4.metric("🥑 Fat", f"{total_fat:.1f}g")
         
-        cur_c = (cals_100 * weight) / 100
-        cur_p = (prot_100 * weight) / 100
-        cur_ch = (carb_100 * weight) / 100
-        cur_f = (fat_100 * weight) / 100
+        st.write("")
+        st.markdown("#### 📋 Food List")
+        # Clean display of the dataframe without the index
+        st.dataframe(df, use_container_width=True, hide_index=True)
         
-        if st.button("➕ Add to My Day", type="primary"):
-            st.session_state.daily_log.append({
-                "Food": product_name, "Weight": weight, "Cals": round(cur_c, 1),
-                "Prot": round(cur_p, 1), "Carb": round(cur_ch, 1), "Fat": round(cur_f, 1)
-            })
-            st.success("Added to your daily log!")
+        st.write("")
+        if st.button("🗑️ Clear All Entries", use_container_width=True):
+            st.session_state.daily_log = []
             st.rerun()
     else:
-        st.warning("Product not found. Try a different term.")
-
-# --- 6. Daily Summary ---
-st.markdown("---")
-st.header("📊 Today's Macros")
-
-if st.session_state.daily_log:
-    df = pd.DataFrame(st.session_state.daily_log)
-    st.dataframe(df, use_container_width=True)
-    
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Cals", f"{df['Cals'].sum():.1f}")
-    c2.metric("Protein", f"{df['Prot'].sum():.1f}g")
-    c3.metric("Carbs", f"{df['Carb'].sum():.1f}g")
-    c4.metric("Fat", f"{df['Fat'].sum():.1f}g")
-    
-    if st.button("🗑️ Clear Log"):
-        st.session_state.daily_log = []
-        st.rerun()
+        st.info("Your log is empty. Search and add some food from the other tab!")

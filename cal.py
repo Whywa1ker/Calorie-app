@@ -93,8 +93,14 @@ def calculate_targets(gender, age, weight, height, activity, goal):
     else: cals = int(tdee + 500); p_pct, c_pct, f_pct = 0.30, 0.50, 0.20
         
     prot, carb, fat = int((cals*p_pct)/4), int((cals*c_pct)/4), int((cals*f_pct)/9)
-    water = int((weight * 35 + (750 if "active" in activity.lower() else 0)) / 250)
-    return cals, prot, carb, fat, water
+    
+    # Water calculation in Liters
+    water_liters = (weight * 35) / 1000
+    if "active" in activity.lower() and "lightly" not in activity.lower():
+        water_liters += 0.75
+    water_liters = round(water_liters, 1)
+    
+    return cals, prot, carb, fat, water_liters
 
 # --- 3. Session State Init ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
@@ -103,26 +109,24 @@ if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "Login"
 if 'verify_code_sent' not in st.session_state: st.session_state.verify_code_sent = False
 if 'temp_reg_data' not in st.session_state: st.session_state.temp_reg_data = {}
 
-# --- 4. UI Config & CSS ---
+# --- 4. UI Config & Base CSS ---
 st.set_page_config(page_title="MyFitness Pro", page_icon="⚡", layout="centered")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-    html, body, [class*="css"]  { font-family: 'Inter', sans-serif; }
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { border-radius: 6px 6px 0px 0px; padding: 10px 16px; background-color: #f0f2f6; }
+    .stTabs [data-baseweb="tab"] { border-radius: 6px 6px 0px 0px; padding: 10px 16px; }
     .stTabs [aria-selected="true"] { background-color: #2e66ff; color: white !important; }
-    [data-testid="stMetricValue"] { font-weight: 800; color: #1f2937; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ==========================================
 # AUTHENTICATION ROUTING
 # ==========================================
 if not st.session_state.logged_in:
     st.markdown("<h1 style='text-align: center;'>⚡ MyFitness Pro</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: gray;'>Your Personal Nutrition & Fitness Tracker</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center;'>Your Personal Nutrition & Fitness Tracker</p>", unsafe_allow_html=True)
     st.write("")
     
     col1, col2, col3 = st.columns([1,2,1])
@@ -180,7 +184,7 @@ if not st.session_state.logged_in:
                                 "password": st.session_state.temp_reg_data["pass"],
                                 "onboarding_done": False,
                                 "profile": {},
-                                "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water": 0
+                                "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0
                             }
                             sync_db()
                             st.session_state.logged_in = True
@@ -199,6 +203,10 @@ if not st.session_state.logged_in:
 # ==========================================
 else:
     user_data = db["users"][st.session_state.current_user]
+    
+    # Ensure water_liters exists in older user profiles
+    if "water_liters" not in user_data:
+        user_data["water_liters"] = 0.0
     
     # --- ONBOARDING FLOW ---
     if not user_data.get("onboarding_done", False):
@@ -221,7 +229,6 @@ else:
             if st.button("Calculate My Plan 🚀", type="primary", use_container_width=True):
                 cals, prot, carb, fat, water = calculate_targets(gen, age, weight, height, act, goal)
                 
-                # Save to DB
                 user_data["profile"] = {
                     "gender": gen, "age": age, "height": height, "activity": act, "goal": goal,
                     "targets": {"cals": cals, "prot": prot, "carb": carb, "fat": fat, "water": water}
@@ -257,23 +264,27 @@ else:
             t_prot = st.number_input("Protein (g)", value=targets["prot"], step=5)
             t_carb = st.number_input("Carbs (g)", value=targets["carb"], step=5)
             t_fat = st.number_input("Fat (g)", value=targets["fat"], step=5)
-            t_water = st.number_input("Water (Glasses)", value=targets["water"], step=1)
+            t_water = st.number_input("Water Goal (Liters)", value=float(targets["water"]), step=0.5)
             
-            # Save overrides immediately
             if t_cals != targets["cals"] or t_prot != targets["prot"] or t_carb != targets["carb"] or t_fat != targets["fat"] or t_water != targets["water"]:
                 user_data["profile"]["targets"] = {"cals": t_cals, "prot": t_prot, "carb": t_carb, "fat": t_fat, "water": t_water}
                 sync_db()
 
             st.markdown("---")
-            st.header("💧 Hydration")
+            st.header("💧 Hydration (Liters)")
             w_col1, w_col2, w_col3 = st.columns([1,1,1])
-            if w_col1.button("➖"): user_data["water"] = max(0, user_data.get("water", 0) - 1); sync_db()
-            w_col2.markdown(f"<h3 style='text-align:center; color:#2e66ff;'>{user_data.get('water', 0)}</h3>", unsafe_allow_html=True)
-            if w_col3.button("➕"): user_data["water"] = user_data.get("water", 0) + 1; sync_db()
-            st.progress(min(user_data.get("water", 0) / t_water, 1.0) if t_water > 0 else 0)
+            if w_col1.button("➖ 0.25L"): 
+                user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25)
+                sync_db()
+            w_col2.markdown(f"<h3 style='text-align:center;'>{user_data.get('water_liters', 0.0):.2f}L</h3>", unsafe_allow_html=True)
+            if w_col3.button("➕ 0.25L"): 
+                user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25
+                sync_db()
+                
+            st.progress(min(user_data.get("water_liters", 0.0) / t_water, 1.0) if t_water > 0 else 0)
 
         # --- MAIN DASHBOARD ---
-        st.markdown("<h1 style='text-align: center; color: #1f2937;'>⚡ MyFitness Pro</h1>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center;'>⚡ MyFitness Pro</h1>", unsafe_allow_html=True)
         st.write("")
 
         tab_dash, tab_add_food, tab_exercise, tab_weight, tab_custom = st.tabs(["📊 Diary", "🥑 Add Food", "🏃‍♂️ Exercise", "⚖️ Weight", "⚙️ Custom"])
@@ -335,7 +346,7 @@ else:
                 st.write("")
                 st.markdown(get_csv_download_link(df_food, "diary.csv"), unsafe_allow_html=True)
                 if st.button("🗑️ Reset Entire Day", use_container_width=True):
-                    user_data["daily_log"] = []; user_data["exercise_log"] = []; user_data["water"] = 0
+                    user_data["daily_log"] = []; user_data["exercise_log"] = []; user_data["water_liters"] = 0.0
                     sync_db(); st.rerun()
 
         # TAB 2: ADD FOOD

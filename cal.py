@@ -109,8 +109,9 @@ if 'current_user' not in st.session_state:
     st.session_state.current_user = None
 if 'auth_mode' not in st.session_state: 
     st.session_state.auth_mode = "Login"
+if 'camera_active' not in st.session_state:
+    st.session_state.camera_active = False
 
-# Auto-Login Logic (Checks URL for remembered user)
 if not st.session_state.logged_in and "user" in st.query_params:
     saved_user = st.query_params["user"]
     if saved_user in db["users"]:
@@ -129,14 +130,14 @@ if not st.session_state.logged_in:
                 st.markdown("### Login")
                 le = st.text_input("Email").lower().strip()
                 lp = st.text_input("Password", type="password")
-                remember = st.checkbox("Remember Me") # הכפתור החדש!
+                remember = st.checkbox("Remember Me") 
                 
                 if st.button("Login", type="primary", use_container_width=True):
                     if le in db["users"] and db["users"][le]["password"] == lp:
                         st.session_state.logged_in = True
                         st.session_state.current_user = le
                         if remember:
-                            st.query_params["user"] = le # שומר בכתובת האתר לפעם הבאה
+                            st.query_params["user"] = le 
                         st.rerun()
                     else: st.error("Wrong email or password.")
                 if st.button("Create Account"): st.session_state.auth_mode = "Register"; st.rerun()
@@ -162,7 +163,7 @@ if not st.session_state.logged_in:
                         sync_db()
                         st.session_state.logged_in = True
                         st.session_state.current_user = email
-                        st.query_params["user"] = email # זוכר משתמש חדש אוטומטית
+                        st.query_params["user"] = email 
                         st.rerun()
 
 # ==========================================
@@ -171,7 +172,6 @@ if not st.session_state.logged_in:
 else:
     user_data = db["users"][st.session_state.current_user]
     
-    # 1. ONBOARDING
     if not user_data.get("onboarding_done", False):
         st.markdown("<h2 style='text-align: center;'>Welcome! Let's build your plan.</h2>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -191,28 +191,24 @@ else:
                 })
                 sync_db(); st.rerun()
 
-    # 2. APP DASHBOARD
     else:
         profile = user_data["profile"]
         targets = profile["targets"]
         w_log = user_data.get("weight_log", [])
         
-        # Safe weight retrieval
         try: current_weight = sorted(w_log, key=lambda x: x["Date"])[-1]["Weight"] if w_log else 75.0
         except: current_weight = 75.0
             
         recommended_water = calculate_targets(profile["gender"], profile["age"], current_weight, profile["height"], profile["activity"], profile["goal"])[4]
 
-        # --- SIDEBAR (ALL SETTINGS RESTORED) ---
         with st.sidebar:
             st.markdown(f"👤 **{st.session_state.current_user}**")
             if st.button("Logout"): 
                 st.session_state.logged_in = False
-                st.query_params.clear() # מוחק את הזיכרון ביציאה
+                st.query_params.clear()
                 st.rerun()
             st.divider()
             
-            # --- FULL PROFILE EDIT ---
             st.markdown("### <i class='fa-solid fa-user-gear'></i> Edit Profile", unsafe_allow_html=True)
             new_gen = st.selectbox("Gender", ["Male", "Female"], index=["Male", "Female"].index(profile.get("gender", "Male")))
             new_age = st.number_input("Age", value=int(profile.get("age", 21)), min_value=10)
@@ -226,7 +222,6 @@ else:
                 sync_db(); st.success("Updated!"); st.rerun()
                 
             st.divider()
-            # --- MANUAL TARGET OVERRIDE ---
             st.markdown("### <i class='fa-solid fa-sliders'></i> Manual Override", unsafe_allow_html=True)
             with st.expander("Edit Targets Manually"):
                 t_cals = st.number_input("Calories", value=targets["cals"], step=50)
@@ -237,7 +232,6 @@ else:
                     user_data["profile"]["targets"].update({"cals": t_cals, "prot": t_prot, "carb": t_carb, "fat": t_fat}); sync_db(); st.rerun()
 
             st.divider()
-            # --- HYDRATION ---
             st.markdown("### <i class='fa-solid fa-glass-water' style='color:#38bdf8;'></i> Hydration", unsafe_allow_html=True)
             st.caption(f"Recommended: {recommended_water}L")
             user_water_goal = st.number_input("Personal Goal (L)", value=float(targets.get("water", recommended_water)), step=0.25)
@@ -249,7 +243,6 @@ else:
             if w_c3.button("+0.25L"): user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25; sync_db()
             st.progress(min(user_data.get("water_liters", 0.0) / user_water_goal, 1.0) if user_water_goal > 0 else 0)
 
-        # --- TABS ---
         st.markdown("<h1 class='app-title'><i class='fa-solid fa-bolt' style='color:#f59e0b;'></i> MyFitness Pro</h1>", unsafe_allow_html=True)
         t_dash, t_add, t_ex, t_weight, t_custom = st.tabs(["Dashboard", "Add Food", "Workouts", "Weight", "Custom"])
 
@@ -297,17 +290,30 @@ else:
             if st.button("Reset Entire Day"): 
                 user_data.update({"daily_log": [], "exercise_log": [], "water_liters": 0.0}); sync_db(); st.rerun()
 
-        # ADD FOOD
+        # ADD FOOD (WITH CAMERA FIX)
         with t_add:
             meal = st.radio("Log to:", ["Breakfast", "Lunch", "Dinner", "Snacks"], horizontal=True)
-            with st.expander("📷 Scan Barcode"):
-                cam = st.camera_input("Scanner", label_visibility="collapsed")
+            
+            # --- CAMERA TOGGLE LOGIC ---
+            if st.button("📷 Open Camera Scanner" if not st.session_state.camera_active else "❌ Close Camera", type="secondary"):
+                st.session_state.camera_active = not st.session_state.camera_active
+                st.rerun()
+            
             code = ""
-            if cam:
-                dec = decode(Image.open(cam))
-                if not dec: dec = decode(ImageEnhance.Contrast(Image.open(cam).convert('L')).enhance(3.0))
-                if dec: code = dec[0].data.decode("utf-8"); st.success(f"Barcode Detected")
-            query = st.text_input("🔍 Search Food:", value=code, placeholder="Name or Barcode")
+            if st.session_state.camera_active:
+                cam = st.camera_input("Point at barcode", label_visibility="collapsed")
+                if cam:
+                    dec = decode(Image.open(cam))
+                    if not dec: dec = decode(ImageEnhance.Contrast(Image.open(cam).convert('L')).enhance(3.0))
+                    if dec: 
+                        code = dec[0].data.decode("utf-8")
+                        st.success("Barcode Detected!")
+                        st.session_state.camera_active = False # Close camera after success
+                    else:
+                        st.error("Barcode not read. Try moving closer.")
+            # ---------------------------
+
+            query = st.text_input("🔍 Search Food:", value=code, placeholder="Type name or scan barcode")
             if query:
                 en = translate_query(query)
                 CDB = {**OFFLINE_DB, **user_data.get("custom_foods", {})}

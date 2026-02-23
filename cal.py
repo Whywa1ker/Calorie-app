@@ -11,6 +11,7 @@ from datetime import date
 import json
 import os
 import io
+import time
 
 # --- 0. Database Setup (Persistence) ---
 DB_FILE = "myfitness_users_db.json"
@@ -105,6 +106,15 @@ def generate_sms_alert(user_data, rem_c, rem_p, rem_water, goal):
     msg += f"\n💡 {MOTIVATIONS.get(goal, '')}"
     return msg
 
+def send_real_sms_mock(phone_number, text_message):
+    """
+    זו הפונקציה שבעתיד תתחבר ל-API אמיתי כמו Twilio.
+    כרגע היא רק מדמה שליחה.
+    """
+    # example real code: requests.post("https://api.twilio.com/...", data={"to": phone_number, "body": text_message})
+    print(f"MOCK SMS SENT TO {phone_number}: {text_message}")
+    return True
+
 # --- 3. Soft UI Config ---
 st.set_page_config(page_title="MyFitness Pro", page_icon="🍏", layout="centered")
 st.markdown("""
@@ -196,7 +206,6 @@ if not st.session_state.logged_in:
 else:
     user_data = db["users"][st.session_state.current_user]
     
-    # Ensure backward compatibility for older accounts
     if "username" not in user_data: user_data["username"] = st.session_state.current_user.split('@')[0]
     if "profile_pic" not in user_data: user_data["profile_pic"] = ""
     if "phone" not in user_data: user_data["phone"] = ""
@@ -240,10 +249,13 @@ else:
 
             # --- ACCOUNT & PHONE SETTINGS ---
             with st.expander("📝 Account & Alerts"):
+                old_phone = user_data.get("phone", "")
+                old_sms = user_data.get("sms_alerts", False)
+                
                 new_username = st.text_input("Username", value=user_data.get("username"))
-                new_phone = st.text_input("📱 Phone (For Alerts)", value=user_data.get("phone", ""), placeholder="e.g. 0501234567")
-                sms_toggle = st.checkbox("🔔 Enable SMS Reminders", value=user_data.get("sms_alerts", False))
-                new_pic = st.file_uploader("Upload Avatar (JPG/PNG)", type=["jpg", "jpeg", "png"])
+                new_phone = st.text_input("📱 Phone (For Alerts)", value=old_phone, placeholder="e.g. 0501234567")
+                sms_toggle = st.checkbox("🔔 Enable SMS Reminders", value=old_sms)
+                new_pic = st.file_uploader("Upload Avatar", type=["jpg", "jpeg", "png"])
                 
                 if st.button("💾 Save Settings", use_container_width=True):
                     taken = any(u.get("username") == new_username for k, u in db["users"].items() if k != st.session_state.current_user)
@@ -258,7 +270,19 @@ else:
                             buffered = io.BytesIO()
                             img.save(buffered, format="JPEG")
                             user_data["profile_pic"] = base64.b64encode(buffered.getvalue()).decode()
-                        sync_db(); st.success("Profile Saved!"); st.rerun()
+                        sync_db()
+                        
+                        # --- SMS WELCOME LOGIC ---
+                        # If user just enabled SMS or changed their phone number while SMS is enabled
+                        if sms_toggle and (new_phone != old_phone or not old_sms) and new_phone != "":
+                            welcome_msg = "שלום! 🍏 שמחים שהצטרפת לשירות ה-SMS וההתראות של MyFitness Pro. אנחנו כאן כדי לעזור לך להגיע ליעדים שלך! 💪"
+                            send_real_sms_mock(new_phone, welcome_msg)
+                            st.balloons()
+                            st.toast(f"📲 נשלח SMS ברוך הבא למספר {new_phone}!")
+                            time.sleep(2) # Give the user time to see the toast before rerun
+                        
+                        st.success("Profile Saved!")
+                        st.rerun()
 
             with st.expander("⚖️ Edit Body Profile"):
                 new_gen = st.selectbox("Gender", ["Male", "Female"], index=["Male", "Female"].index(profile.get("gender", "Male")))
@@ -310,11 +334,12 @@ else:
                 rem_w = max(0, targets["water"] - user_data.get("water_liters", 0.0))
                 sms_text = generate_sms_alert(user_data, rem_c, rem_p, rem_w, profile.get("goal"))
                 
-                st.success(f"📱 **SMS Alerts Active ({user_data['phone']})**")
+                st.info(f"📱 **SMS Alerts Active ({user_data['phone']})**")
                 with st.expander("📬 View Pending Alerts & Motivation"):
                     st.write(sms_text)
                     if st.button("🔔 Send Test SMS Now", type="secondary"):
-                        st.toast("SMS Sent successfully! (Simulation)")
+                        send_real_sms_mock(user_data['phone'], sms_text)
+                        st.toast("✅ SMS Sent successfully! (Simulation)")
             
             # --- METRICS ---
             st.markdown("### 🔋 Energy Balance")

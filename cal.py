@@ -95,10 +95,18 @@ st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap');
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    
+    /* Clean Tabs UI */
     .stTabs [data-baseweb="tab-list"] { gap: 4px; border-bottom: 2px solid #e5e7eb; }
     .stTabs [data-baseweb="tab"] { border-radius: 8px 8px 0px 0px; padding: 12px 16px; color: #6b7280; font-weight: 500; font-size: 0.9rem; }
     .stTabs [aria-selected="true"] { background-color: #f3f4f6; color: #111827 !important; border-bottom: 3px solid #2e66ff; }
     .app-title { text-align: center; color: #111827; font-weight: 800; font-size: 2.2rem; margin-bottom: 0px; }
+    
+    /* Native App Feel - Hide all toolbars, headers, and footers */
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    [data-testid="stToolbar"] {visibility: hidden;}
+    [data-testid="stElementToolbar"] {display: none;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -275,7 +283,9 @@ else:
                     st.progress(min(cur / goal, 1.0) if goal > 0 else 0)
             with col_pi:
                 fig = px.pie(pd.DataFrame({"M": ["P", "C", "F"], "G": [df_f['Protein'].sum(), df_f['Carbs'].sum(), df_f['Fat'].sum()]}), values='G', names='M', hole=0.5, color_discrete_sequence=['#EF553B', '#636EFA', '#00CC96'])
-                fig.update_layout(height=180, showlegend=False, margin=dict(t=0, b=0, l=0, r=0)); st.plotly_chart(fig, use_container_width=True)
+                fig.update_layout(height=180, showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
+                # --- FIXED: Added config to hide ModeBar in Pie Chart ---
+                st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
             for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"]:
                 m_data = df_f[df_f["Meal"] == meal]
@@ -290,11 +300,10 @@ else:
             if st.button("Reset Entire Day"): 
                 user_data.update({"daily_log": [], "exercise_log": [], "water_liters": 0.0}); sync_db(); st.rerun()
 
-        # ADD FOOD (WITH CAMERA FIX)
+        # ADD FOOD
         with t_add:
             meal = st.radio("Log to:", ["Breakfast", "Lunch", "Dinner", "Snacks"], horizontal=True)
             
-            # --- CAMERA TOGGLE LOGIC ---
             if st.button("📷 Open Camera Scanner" if not st.session_state.camera_active else "❌ Close Camera", type="secondary"):
                 st.session_state.camera_active = not st.session_state.camera_active
                 st.rerun()
@@ -308,10 +317,9 @@ else:
                     if dec: 
                         code = dec[0].data.decode("utf-8")
                         st.success("Barcode Detected!")
-                        st.session_state.camera_active = False # Close camera after success
+                        st.session_state.camera_active = False 
                     else:
                         st.error("Barcode not read. Try moving closer.")
-            # ---------------------------
 
             query = st.text_input("🔍 Search Food:", value=code, placeholder="Type name or scan barcode")
             if query:

@@ -102,10 +102,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. Auth State ---
-if 'logged_in' not in st.session_state: st.session_state.logged_in = False
-if 'current_user' not in st.session_state: st.session_state.current_user = None
-if 'auth_mode' not in st.session_state: st.session_state.auth_mode = "Login"
+# --- 4. Auth State & "Remember Me" Auto-Login ---
+if 'logged_in' not in st.session_state: 
+    st.session_state.logged_in = False
+if 'current_user' not in st.session_state: 
+    st.session_state.current_user = None
+if 'auth_mode' not in st.session_state: 
+    st.session_state.auth_mode = "Login"
+
+# Auto-Login Logic (Checks URL for remembered user)
+if not st.session_state.logged_in and "user" in st.query_params:
+    saved_user = st.query_params["user"]
+    if saved_user in db["users"]:
+        st.session_state.logged_in = True
+        st.session_state.current_user = saved_user
 
 # ==========================================
 # AUTHENTICATION SCREEN
@@ -119,12 +129,18 @@ if not st.session_state.logged_in:
                 st.markdown("### Login")
                 le = st.text_input("Email").lower().strip()
                 lp = st.text_input("Password", type="password")
+                remember = st.checkbox("Remember Me") # הכפתור החדש!
+                
                 if st.button("Login", type="primary", use_container_width=True):
                     if le in db["users"] and db["users"][le]["password"] == lp:
-                        st.session_state.logged_in, st.session_state.current_user = True, le
+                        st.session_state.logged_in = True
+                        st.session_state.current_user = le
+                        if remember:
+                            st.query_params["user"] = le # שומר בכתובת האתר לפעם הבאה
                         st.rerun()
                     else: st.error("Wrong email or password.")
                 if st.button("Create Account"): st.session_state.auth_mode = "Register"; st.rerun()
+                
             elif st.session_state.auth_mode == "Register":
                 st.markdown("### Register")
                 re = st.text_input("Email").lower().strip()
@@ -133,7 +149,9 @@ if not st.session_state.logged_in:
                     if re and len(rp) >= 4:
                         st.session_state.temp_reg = {"e": re, "p": rp}
                         st.session_state.auth_mode = "Verify"; st.rerun()
+                    else: st.error("Enter valid email and password (min 4 chars)")
                 if st.button("Back"): st.session_state.auth_mode = "Login"; st.rerun()
+                
             elif st.session_state.auth_mode == "Verify":
                 st.info("Code: 1234")
                 vc = st.text_input("Enter 4-digit code")
@@ -141,7 +159,11 @@ if not st.session_state.logged_in:
                     if vc == "1234":
                         email = st.session_state.temp_reg["e"]
                         db["users"][email] = {"password": st.session_state.temp_reg["p"], "onboarding_done": False, "profile": {}, "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0}
-                        sync_db(); st.session_state.logged_in, st.session_state.current_user = True, email; st.rerun()
+                        sync_db()
+                        st.session_state.logged_in = True
+                        st.session_state.current_user = email
+                        st.query_params["user"] = email # זוכר משתמש חדש אוטומטית
+                        st.rerun()
 
 # ==========================================
 # MAIN APP
@@ -176,40 +198,58 @@ else:
         w_log = user_data.get("weight_log", [])
         
         # Safe weight retrieval
-        try:
-            current_weight = sorted(w_log, key=lambda x: x["Date"])[-1]["Weight"] if w_log else 75.0
+        try: current_weight = sorted(w_log, key=lambda x: x["Date"])[-1]["Weight"] if w_log else 75.0
         except: current_weight = 75.0
             
         recommended_water = calculate_targets(profile["gender"], profile["age"], current_weight, profile["height"], profile["activity"], profile["goal"])[4]
 
-        # --- SIDEBAR (ALL SETTINGS) ---
+        # --- SIDEBAR (ALL SETTINGS RESTORED) ---
         with st.sidebar:
             st.markdown(f"👤 **{st.session_state.current_user}**")
-            if st.button("Logout"): st.session_state.logged_in = False; st.rerun()
+            if st.button("Logout"): 
+                st.session_state.logged_in = False
+                st.query_params.clear() # מוחק את הזיכרון ביציאה
+                st.rerun()
             st.divider()
             
+            # --- FULL PROFILE EDIT ---
             st.markdown("### <i class='fa-solid fa-user-gear'></i> Edit Profile", unsafe_allow_html=True)
-            new_age = st.number_input("Age", value=int(profile["age"]))
+            new_gen = st.selectbox("Gender", ["Male", "Female"], index=["Male", "Female"].index(profile.get("gender", "Male")))
+            new_age = st.number_input("Age", value=int(profile.get("age", 21)), min_value=10)
+            new_height = st.number_input("Height (cm)", value=int(profile.get("height", 175)), min_value=100)
             new_act = st.selectbox("Activity", ["Sedentary", "Lightly active", "Moderately active", "Very active", "Super active"], index=["Sedentary", "Lightly active", "Moderately active", "Very active", "Super active"].index(profile["activity"]))
             new_goal = st.selectbox("Goal", ["Weight Loss (Cut)", "Maintenance", "Lean Muscle Gain", "Bodybuilding (Bulk)"], index=["Weight Loss (Cut)", "Maintenance", "Lean Muscle Gain", "Bodybuilding (Bulk)"].index(profile["goal"]))
             
-            if st.button("Update Targets"):
-                c, p, cb, f, w = calculate_targets(profile["gender"], new_age, current_weight, profile["height"], new_act, new_goal)
-                user_data["profile"].update({"age": new_age, "activity": new_act, "goal": new_goal, "targets": {"cals": c, "prot": p, "carb": cb, "fat": f, "water": w}})
-                sync_db(); st.rerun()
+            if st.button("Update Profile & Recalculate"):
+                c, p, cb, f, w = calculate_targets(new_gen, new_age, current_weight, new_height, new_act, new_goal)
+                user_data["profile"].update({"gender": new_gen, "age": new_age, "height": new_height, "activity": new_act, "goal": new_goal, "targets": {"cals": c, "prot": p, "carb": cb, "fat": f, "water": w}})
+                sync_db(); st.success("Updated!"); st.rerun()
                 
             st.divider()
+            # --- MANUAL TARGET OVERRIDE ---
+            st.markdown("### <i class='fa-solid fa-sliders'></i> Manual Override", unsafe_allow_html=True)
+            with st.expander("Edit Targets Manually"):
+                t_cals = st.number_input("Calories", value=targets["cals"], step=50)
+                t_prot = st.number_input("Protein (g)", value=targets["prot"], step=5)
+                t_carb = st.number_input("Carbs (g)", value=targets["carb"], step=5)
+                t_fat = st.number_input("Fat (g)", value=targets["fat"], step=5)
+                if st.button("Save Manual Targets"):
+                    user_data["profile"]["targets"].update({"cals": t_cals, "prot": t_prot, "carb": t_carb, "fat": t_fat}); sync_db(); st.rerun()
+
+            st.divider()
+            # --- HYDRATION ---
             st.markdown("### <i class='fa-solid fa-glass-water' style='color:#38bdf8;'></i> Hydration", unsafe_allow_html=True)
             st.caption(f"Recommended: {recommended_water}L")
             user_water_goal = st.number_input("Personal Goal (L)", value=float(targets.get("water", recommended_water)), step=0.25)
             if user_water_goal != targets.get("water"): user_data["profile"]["targets"]["water"] = user_water_goal; sync_db()
             
             w_c1, w_c2, w_c3 = st.columns([1,1,1])
-            if w_c1.button("-0.25"): user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25); sync_db()
+            if w_c1.button("-0.25L"): user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25); sync_db()
             w_c2.markdown(f"<h4 style='text-align:center;'>{user_data.get('water_liters', 0.0):.2f}L</h4>", unsafe_allow_html=True)
-            if w_c3.button("+0.25"): user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25; sync_db()
+            if w_c3.button("+0.25L"): user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25; sync_db()
             st.progress(min(user_data.get("water_liters", 0.0) / user_water_goal, 1.0) if user_water_goal > 0 else 0)
 
+        # --- TABS ---
         st.markdown("<h1 class='app-title'><i class='fa-solid fa-bolt' style='color:#f59e0b;'></i> MyFitness Pro</h1>", unsafe_allow_html=True)
         t_dash, t_add, t_ex, t_weight, t_custom = st.tabs(["Dashboard", "Add Food", "Workouts", "Weight", "Custom"])
 
@@ -306,7 +346,7 @@ else:
                 user_data["exercise_log"].append({"Exercise": sel_e, "Burned": burn}); sync_db(); st.rerun()
             if user_data["exercise_log"]: st.dataframe(pd.DataFrame(user_data["exercise_log"]), use_container_width=True, hide_index=True)
 
-        # WEIGHT TRACKER (MOBILE FRIENDLY GRAPH)
+        # WEIGHT TRACKER
         with t_weight:
             with st.container(border=True):
                 w_in = st.number_input("Enter Today's Weight (kg)", value=float(current_weight), step=0.1)
@@ -321,7 +361,6 @@ else:
                 df_w = pd.DataFrame(user_data["weight_log"])
                 df_w['Date'] = pd.to_datetime(df_w['Date'])
                 
-                # Trendline Logic
                 sd, sw, g = df_w['Date'].iloc[0], df_w['Weight'].iloc[0], profile.get("goal")
                 dr = -0.07 if "Weight Loss" in g else (0.035 if "Muscle" in g else (0.07 if "Bodybuilding" in g else 0))
                 df_w['Days'] = (df_w['Date'] - sd).dt.days

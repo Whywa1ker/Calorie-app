@@ -120,6 +120,7 @@ if 'auth_mode' not in st.session_state:
 if 'camera_active' not in st.session_state:
     st.session_state.camera_active = False
 
+# URL Parameter Check
 if not st.session_state.logged_in and "user" in st.query_params:
     saved_user = st.query_params["user"]
     if saved_user in db["users"]:
@@ -136,43 +137,65 @@ if not st.session_state.logged_in:
         with st.container(border=True):
             if st.session_state.auth_mode == "Login":
                 st.markdown("### Login")
-                le = st.text_input("Email").lower().strip()
-                lp = st.text_input("Password", type="password")
-                remember = st.checkbox("Remember Me") 
                 
-                if st.button("Login", type="primary", use_container_width=True):
-                    if le in db["users"] and db["users"][le]["password"] == lp:
-                        st.session_state.logged_in = True
-                        st.session_state.current_user = le
-                        if remember:
-                            st.query_params["user"] = le 
-                        st.rerun()
-                    else: st.error("Wrong email or password.")
-                if st.button("Create Account"): st.session_state.auth_mode = "Register"; st.rerun()
+                # --- AUTO-FILL FORM ---
+                with st.form("login_form"):
+                    le = st.text_input("Email", placeholder="user@email.com").lower().strip()
+                    lp = st.text_input("Password", type="password", placeholder="••••••••")
+                    remember = st.checkbox("Remember Me on this device", value=True)
+                    
+                    submit_btn = st.form_submit_button("Login", type="primary", use_container_width=True)
+                    
+                    if submit_btn:
+                        if le in db["users"] and db["users"][le]["password"] == lp:
+                            st.session_state.logged_in = True
+                            st.session_state.current_user = le
+                            if remember:
+                                st.query_params["user"] = le 
+                            st.rerun()
+                        else: 
+                            st.error("Wrong email or password.")
+                # -----------------------
+                
+                st.write("")
+                if st.button("Create Account", use_container_width=True): 
+                    st.session_state.auth_mode = "Register"
+                    st.rerun()
                 
             elif st.session_state.auth_mode == "Register":
                 st.markdown("### Register")
-                re = st.text_input("Email").lower().strip()
-                rp = st.text_input("Password", type="password")
-                if st.button("Get Started", type="primary", use_container_width=True):
-                    if re and len(rp) >= 4:
-                        st.session_state.temp_reg = {"e": re, "p": rp}
-                        st.session_state.auth_mode = "Verify"; st.rerun()
-                    else: st.error("Enter valid email and password (min 4 chars)")
-                if st.button("Back"): st.session_state.auth_mode = "Login"; st.rerun()
+                with st.form("register_form"):
+                    re = st.text_input("Email").lower().strip()
+                    rp = st.text_input("Password", type="password")
+                    reg_btn = st.form_submit_button("Get Started", type="primary", use_container_width=True)
+                    
+                    if reg_btn:
+                        if re and len(rp) >= 4:
+                            st.session_state.temp_reg = {"e": re, "p": rp}
+                            st.session_state.auth_mode = "Verify"
+                            st.rerun()
+                        else: 
+                            st.error("Enter valid email and password (min 4 chars)")
+                            
+                if st.button("Back"): 
+                    st.session_state.auth_mode = "Login"
+                    st.rerun()
                 
             elif st.session_state.auth_mode == "Verify":
                 st.info("Code: 1234")
-                vc = st.text_input("Enter 4-digit code")
-                if st.button("Verify", type="primary", use_container_width=True):
-                    if vc == "1234":
-                        email = st.session_state.temp_reg["e"]
-                        db["users"][email] = {"password": st.session_state.temp_reg["p"], "onboarding_done": False, "profile": {}, "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0}
-                        sync_db()
-                        st.session_state.logged_in = True
-                        st.session_state.current_user = email
-                        st.query_params["user"] = email 
-                        st.rerun()
+                with st.form("verify_form"):
+                    vc = st.text_input("Enter 4-digit code")
+                    v_btn = st.form_submit_button("Verify", type="primary", use_container_width=True)
+                    
+                    if v_btn:
+                        if vc == "1234":
+                            email = st.session_state.temp_reg["e"]
+                            db["users"][email] = {"password": st.session_state.temp_reg["p"], "onboarding_done": False, "profile": {}, "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0}
+                            sync_db()
+                            st.session_state.logged_in = True
+                            st.session_state.current_user = email
+                            st.query_params["user"] = email 
+                            st.rerun()
 
 # ==========================================
 # MAIN APP
@@ -284,7 +307,6 @@ else:
             with col_pi:
                 fig = px.pie(pd.DataFrame({"M": ["P", "C", "F"], "G": [df_f['Protein'].sum(), df_f['Carbs'].sum(), df_f['Fat'].sum()]}), values='G', names='M', hole=0.5, color_discrete_sequence=['#EF553B', '#636EFA', '#00CC96'])
                 fig.update_layout(height=180, showlegend=False, margin=dict(t=0, b=0, l=0, r=0))
-                # --- FIXED: Added config to hide ModeBar in Pie Chart ---
                 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
 
             for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"]:

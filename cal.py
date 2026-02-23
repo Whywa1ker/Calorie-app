@@ -12,7 +12,7 @@ import json
 import os
 import io
 
-# --- 0. Database Setup ---
+# --- 0. Database Setup (Persistence) ---
 DB_FILE = "myfitness_users_db.json"
 
 def load_db():
@@ -29,7 +29,7 @@ def sync_db():
 
 db = load_db()
 
-# --- 1. Constants ---
+# --- 1. Constants & Motivations ---
 EXERCISE_METS = {
     "Weightlifting (Standard)": 5.0, "Weightlifting (Heavy)": 6.0,
     "Running (10 km/h)": 9.8, "Running (12 km/h)": 11.8,
@@ -49,6 +49,13 @@ OFFLINE_DB = {
     "hummus": {"cals": 250, "prot": 8.0, "carb": 14.0, "fat": 18.0},
     "oats": {"cals": 389, "prot": 16.9, "carb": 66.0, "fat": 6.9},
     "bamba": {"cals": 534, "prot": 15.0, "carb": 40.0, "fat": 35.0}
+}
+
+MOTIVATIONS = {
+    "Weight Loss (Cut)": "קצת רעב עכשיו = תוצאות מחר! תמשיך בגירעון הקלורי, אתה בדרך הנכונה. 💪",
+    "Maintenance": "הסוד הוא התמדה! לשמור על מאזן זה לא קל, אבל אתה עושה את זה מעולה. ⚖️",
+    "Lean Muscle Gain": "כל אימון וכל ארוחה בונים אותך. אל תשכח את החלבון שלך היום! 🥩",
+    "Bodybuilding (Bulk)": "כדי לגדול צריך לאכול! אל תפחד מהפחמימות, הן הדלק שלך לאימון. 🚀"
 }
 
 # --- 2. Core Functions ---
@@ -89,44 +96,31 @@ def calculate_targets(gender, age, weight, height, activity, goal):
     water = round((weight * 35) / 1000 + (0.75 if "active" in activity.lower() else 0), 1)
     return cals, prot, carb, fat, water
 
+def generate_sms_alert(user_data, rem_c, rem_p, rem_water, goal):
+    msg = ""
+    if rem_water > 0.5: msg += f"💧 חסר לך עדיין {rem_water:.1f} ליטר מים ליעד! אל תשכח לשתות.\n"
+    if rem_p > 20: msg += f"🥩 יש לך עוד {rem_p:.0f} גרם חלבון להשלים היום בשביל השרירים.\n"
+    if rem_c > 300: msg += f"🔥 נשארו לך {rem_c:.0f} קלוריות! זמן לארוחה טובה.\n"
+    if not msg: msg = "🏆 עמדת בכל היעדים שלך להיום! עבודה מדהימה."
+    msg += f"\n💡 {MOTIVATIONS.get(goal, '')}"
+    return msg
+
 # --- 3. Soft UI Config ---
 st.set_page_config(page_title="MyFitness Pro", page_icon="🍏", layout="centered")
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;700;800&display=swap');
     html, body, [class*="css"] { font-family: 'Heebo', sans-serif; }
-    
-    /* Soft App Title */
     .app-title { text-align: center; color: #1e293b; font-weight: 800; font-size: 2.2rem; margin-bottom: 5px; }
     .app-subtitle { text-align: center; color: #64748b; font-size: 1rem; margin-top: 0px; margin-bottom: 25px; }
-    
-    /* Clean Tabs with rounded corners */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; border-bottom: none; justify-content: center; }
-    .stTabs [data-baseweb="tab"] { border-radius: 12px; padding: 10px 16px; color: #64748b; font-weight: 500; font-size: 0.95rem; background-color: #f1f5f9; border: none; }
+    .stTabs [data-baseweb="tab"] { border-radius: 12px; padding: 10px 16px; color: #64748b; font-weight: 500; background-color: #f1f5f9; border: none; }
     .stTabs [aria-selected="true"] { background-color: #3b82f6 !important; color: white !important; font-weight: 700; box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.3); }
-    
-    /* Beautiful Metric Cards (Energy Balance) */
-    div[data-testid="stMetric"] {
-        background-color: #ffffff;
-        padding: 15px;
-        border-radius: 16px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
-        border: 1px solid #f1f5f9;
-        text-align: center;
-    }
+    div[data-testid="stMetric"] { background-color: #ffffff; padding: 15px; border-radius: 16px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #f1f5f9; text-align: center; }
     [data-testid="stMetricValue"] { font-size: 1.8rem; font-weight: 800; color: #0f172a; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem; font-weight: 600; color: #64748b; margin-bottom: 5px; }
-    
-    /* Expanders & Containers */
-    [data-testid="stExpander"] { border-radius: 16px !important; border: 1px solid #e2e8f0 !important; overflow: hidden; }
-    
-    /* Mobile App native feel */
-    header {visibility: hidden;}
-    footer {visibility: hidden;}
-    [data-testid="stToolbar"] {visibility: hidden;}
-    
-    /* Make buttons friendly */
-    .stButton>button { border-radius: 12px; font-weight: 600; padding: 10px 0; }
+    [data-testid="stExpander"] { border-radius: 16px !important; border: 1px solid #e2e8f0 !important; }
+    header {visibility: hidden;} footer {visibility: hidden;} [data-testid="stToolbar"] {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -148,18 +142,16 @@ if not st.session_state.logged_in and "user" in st.query_params:
 if not st.session_state.logged_in:
     st.markdown("<h1 class='app-title'>⚡ MyFitness Pro</h1>", unsafe_allow_html=True)
     st.markdown("<p class='app-subtitle'>Your Personal Nutrition & Training App</p>", unsafe_allow_html=True)
-    
     col1, col2, col3 = st.columns([0.1, 0.8, 0.1])
     with col2:
         with st.container(border=True):
             if st.session_state.auth_mode == "Login":
                 st.markdown("### 👋 Welcome Back")
                 with st.form("login_form"):
-                    le = st.text_input("📧 Email", placeholder="user@email.com").lower().strip()
-                    lp = st.text_input("🔒 Password", type="password", placeholder="••••••••")
-                    remember = st.checkbox("💾 Remember Me on this device", value=True)
+                    le = st.text_input("📧 Email").lower().strip()
+                    lp = st.text_input("🔒 Password", type="password")
+                    remember = st.checkbox("💾 Remember Me", value=True)
                     submit_btn = st.form_submit_button("Log In", type="primary", use_container_width=True)
-                    
                     if submit_btn:
                         if le in db["users"] and db["users"][le]["password"] == lp:
                             st.session_state.logged_in = True
@@ -169,8 +161,7 @@ if not st.session_state.logged_in:
                         else: st.error("Wrong email or password.")
                 st.write("")
                 if st.button("New here? Create Account", use_container_width=True): 
-                    st.session_state.auth_mode = "Register"
-                    st.rerun()
+                    st.session_state.auth_mode = "Register"; st.rerun()
                 
             elif st.session_state.auth_mode == "Register":
                 st.markdown("### ✨ Create Account")
@@ -179,15 +170,11 @@ if not st.session_state.logged_in:
                     rp = st.text_input("🔒 Password", type="password")
                     reg_btn = st.form_submit_button("Get Started", type="primary", use_container_width=True)
                     if reg_btn:
-                        if re in db["users"]: st.error("Account already exists!")
+                        if re in db["users"]: st.error("Account exists!")
                         elif re and len(rp) >= 4:
-                            st.session_state.temp_reg = {"e": re, "p": rp}
-                            st.session_state.auth_mode = "Verify"
-                            st.rerun()
+                            st.session_state.temp_reg = {"e": re, "p": rp}; st.session_state.auth_mode = "Verify"; st.rerun()
                         else: st.error("Enter valid email and password (min 4 chars)")
-                if st.button("⬅️ Back to Login"): 
-                    st.session_state.auth_mode = "Login"
-                    st.rerun()
+                if st.button("⬅️ Back to Login"): st.session_state.auth_mode = "Login"; st.rerun()
                 
             elif st.session_state.auth_mode == "Verify":
                 st.info("💡 Hint: Enter '1234' to verify")
@@ -198,16 +185,10 @@ if not st.session_state.logged_in:
                         if vc == "1234":
                             email = st.session_state.temp_reg["e"]
                             db["users"][email] = {
-                                "password": st.session_state.temp_reg["p"],
-                                "username": email.split('@')[0], 
-                                "profile_pic": "", "onboarding_done": False, "profile": {}, 
-                                "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0
+                                "password": st.session_state.temp_reg["p"], "username": email.split('@')[0], "profile_pic": "", "phone": "", "sms_alerts": False,
+                                "onboarding_done": False, "profile": {}, "daily_log": [], "exercise_log": [], "weight_log": [], "custom_foods": {}, "water_liters": 0.0
                             }
-                            sync_db()
-                            st.session_state.logged_in = True
-                            st.session_state.current_user = email
-                            st.query_params["user"] = email 
-                            st.rerun()
+                            sync_db(); st.session_state.logged_in = True; st.session_state.current_user = email; st.query_params["user"] = email; st.rerun()
 
 # ==========================================
 # MAIN APP
@@ -215,10 +196,12 @@ if not st.session_state.logged_in:
 else:
     user_data = db["users"][st.session_state.current_user]
     
+    # Ensure backward compatibility for older accounts
     if "username" not in user_data: user_data["username"] = st.session_state.current_user.split('@')[0]
     if "profile_pic" not in user_data: user_data["profile_pic"] = ""
+    if "phone" not in user_data: user_data["phone"] = ""
+    if "sms_alerts" not in user_data: user_data["sms_alerts"] = False
     
-    # 1. ONBOARDING
     if not user_data.get("onboarding_done", False):
         st.markdown("<h2 style='text-align: center;'>🎯 Let's build your plan</h2>", unsafe_allow_html=True)
         with st.container(border=True):
@@ -231,22 +214,15 @@ else:
             goal = st.selectbox("🎯 Your Goal", ["Weight Loss (Cut)", "Maintenance", "Lean Muscle Gain", "Bodybuilding (Bulk)"])
             if st.button("🚀 Calculate My Plan", type="primary", use_container_width=True):
                 cals, prot, carb, fat, water = calculate_targets(gen, age, weight, height, act, goal)
-                user_data.update({
-                    "profile": {"gender": gen, "age": age, "height": height, "activity": act, "goal": goal, "targets": {"cals": cals, "prot": prot, "carb": carb, "fat": fat, "water": water}},
-                    "weight_log": [{"Date": str(date.today()), "Weight": weight}],
-                    "onboarding_done": True
-                })
+                user_data.update({"profile": {"gender": gen, "age": age, "height": height, "activity": act, "goal": goal, "targets": {"cals": cals, "prot": prot, "carb": carb, "fat": fat, "water": water}}, "weight_log": [{"Date": str(date.today()), "Weight": weight}], "onboarding_done": True})
                 sync_db(); st.rerun()
 
-    # 2. APP DASHBOARD
     else:
         profile = user_data["profile"]
         targets = profile["targets"]
         w_log = user_data.get("weight_log", [])
-        
         try: current_weight = sorted(w_log, key=lambda x: x["Date"])[-1]["Weight"] if w_log else 75.0
         except: current_weight = 75.0
-            
         recommended_water = calculate_targets(profile["gender"], profile["age"], current_weight, profile["height"], profile["activity"], profile["goal"])[4]
 
         # --- SIDEBAR MENU ---
@@ -259,26 +235,30 @@ else:
             with c2:
                 st.markdown(f"<h3 style='margin-bottom:0px; padding-top:10px;'>{user_data.get('username')}</h3>", unsafe_allow_html=True)
                 if st.button("🚪 Logout", use_container_width=True): 
-                    st.session_state.logged_in = False
-                    st.query_params.clear()
-                    st.rerun()
+                    st.session_state.logged_in = False; st.query_params.clear(); st.rerun()
             st.divider()
 
-            with st.expander("📝 Account Settings"):
+            # --- ACCOUNT & PHONE SETTINGS ---
+            with st.expander("📝 Account & Alerts"):
                 new_username = st.text_input("Username", value=user_data.get("username"))
+                new_phone = st.text_input("📱 Phone (For Alerts)", value=user_data.get("phone", ""), placeholder="e.g. 0501234567")
+                sms_toggle = st.checkbox("🔔 Enable SMS Reminders", value=user_data.get("sms_alerts", False))
                 new_pic = st.file_uploader("Upload Avatar (JPG/PNG)", type=["jpg", "jpeg", "png"])
-                if st.button("💾 Save Account Info", use_container_width=True):
+                
+                if st.button("💾 Save Settings", use_container_width=True):
                     taken = any(u.get("username") == new_username for k, u in db["users"].items() if k != st.session_state.current_user)
                     if taken: st.error("Username is taken!")
                     else:
                         user_data["username"] = new_username
+                        user_data["phone"] = new_phone
+                        user_data["sms_alerts"] = sms_toggle
                         if new_pic:
                             img = Image.open(new_pic).convert("RGB")
                             img.thumbnail((150, 150))
                             buffered = io.BytesIO()
                             img.save(buffered, format="JPEG")
                             user_data["profile_pic"] = base64.b64encode(buffered.getvalue()).decode()
-                        sync_db(); st.success("Updated!"); st.rerun()
+                        sync_db(); st.success("Profile Saved!"); st.rerun()
 
             with st.expander("⚖️ Edit Body Profile"):
                 new_gen = st.selectbox("Gender", ["Male", "Female"], index=["Male", "Female"].index(profile.get("gender", "Male")))
@@ -301,14 +281,13 @@ else:
 
             st.divider()
             st.markdown("### 💧 Hydration Station")
-            st.caption(f"🔬 Recommended for you: {recommended_water}L")
-            user_water_goal = st.number_input("🎯 Personal Goal (L)", value=float(targets.get("water", recommended_water)), step=0.25)
+            user_water_goal = st.number_input("🎯 Goal (L)", value=float(targets.get("water", recommended_water)), step=0.25)
             if user_water_goal != targets.get("water"): user_data["profile"]["targets"]["water"] = user_water_goal; sync_db()
             
             w_c1, w_c2, w_c3 = st.columns([1,1,1])
-            if w_c1.button("➖ 0.25", use_container_width=True): user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25); sync_db()
+            if w_c1.button("➖", use_container_width=True): user_data["water_liters"] = max(0.0, user_data.get("water_liters", 0.0) - 0.25); sync_db()
             w_c2.markdown(f"<h3 style='text-align:center; color:#3b82f6;'>{user_data.get('water_liters', 0.0):.2f}L</h3>", unsafe_allow_html=True)
-            if w_c3.button("➕ 0.25", use_container_width=True): user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25; sync_db()
+            if w_c3.button("➕", use_container_width=True): user_data["water_liters"] = user_data.get("water_liters", 0.0) + 0.25; sync_db()
             st.progress(min(user_data.get("water_liters", 0.0) / user_water_goal, 1.0) if user_water_goal > 0 else 0)
 
         # --- MAIN TABS ---
@@ -325,6 +304,19 @@ else:
             t_food, t_burn = df_f['Calories'].sum(), df_e['Burned'].sum()
             rem_c = targets["cals"] - (t_food - t_burn)
             
+            # --- NOTIFICATIONS HUB ---
+            if user_data.get("sms_alerts") and user_data.get("phone"):
+                rem_p = max(0, targets["prot"] - df_f['Protein'].sum())
+                rem_w = max(0, targets["water"] - user_data.get("water_liters", 0.0))
+                sms_text = generate_sms_alert(user_data, rem_c, rem_p, rem_w, profile.get("goal"))
+                
+                st.success(f"📱 **SMS Alerts Active ({user_data['phone']})**")
+                with st.expander("📬 View Pending Alerts & Motivation"):
+                    st.write(sms_text)
+                    if st.button("🔔 Send Test SMS Now", type="secondary"):
+                        st.toast("SMS Sent successfully! (Simulation)")
+            
+            # --- METRICS ---
             st.markdown("### 🔋 Energy Balance")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("🎯 Goal", targets["cals"])
@@ -377,9 +369,7 @@ else:
                     dec = decode(Image.open(cam))
                     if not dec: dec = decode(ImageEnhance.Contrast(Image.open(cam).convert('L')).enhance(3.0))
                     if dec: 
-                        code = dec[0].data.decode("utf-8")
-                        st.success("✅ Barcode Detected!")
-                        st.session_state.camera_active = False 
+                        code = dec[0].data.decode("utf-8"); st.success("✅ Barcode Detected!"); st.session_state.camera_active = False 
                     else: st.error("❌ Barcode not read. Try moving closer.")
 
             query = st.text_input("🔍 Search Database:", value=code, placeholder="Type food name or scan barcode")
@@ -402,13 +392,7 @@ else:
                         w = st.number_input("⚖️ Grams eaten:", value=100.0)
                         if st.button("➕ Add to Diary", type="primary"):
                             n = opt[sel_g].get('nutriments', {})
-                            user_data["daily_log"].append({
-                                "Meal": meal, "Food": sel_g, "Grams": w,
-                                "Calories": round((n.get("energy-kcal_100g",0)*w)/100, 1),
-                                "Protein": round((n.get("proteins_100g",0)*w)/100, 1),
-                                "Carbs": round((n.get("carbohydrates_100g",0)*w)/100, 1),
-                                "Fat": round((n.get("fat_100g",0)*w)/100, 1)
-                            })
+                            user_data["daily_log"].append({"Meal": meal, "Food": sel_g, "Grams": w, "Calories": round((n.get("energy-kcal_100g",0)*w)/100, 1), "Protein": round((n.get("proteins_100g",0)*w)/100, 1), "Carbs": round((n.get("carbohydrates_100g",0)*w)/100, 1), "Fat": round((n.get("fat_100g",0)*w)/100, 1)})
                             sync_db(); st.rerun()
 
         # TAB 3: WORKOUTS
@@ -436,18 +420,15 @@ else:
             if len(user_data["weight_log"]) > 0:
                 df_w = pd.DataFrame(user_data["weight_log"])
                 df_w['Date'] = pd.to_datetime(df_w['Date'])
-                
                 sd, sw, g = df_w['Date'].iloc[0], df_w['Weight'].iloc[0], profile.get("goal")
                 dr = -0.07 if "Weight Loss" in g else (0.035 if "Muscle" in g else (0.07 if "Bodybuilding" in g else 0))
                 df_w['Days'] = (df_w['Date'] - sd).dt.days
                 df_w['Ideal'] = sw + (df_w['Days'] * dr)
-                
                 fig = go.Figure()
                 fig.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Weight'], mode='lines+markers', name='Actual', line=dict(color='#3b82f6', width=4)))
                 fig.add_trace(go.Scatter(x=df_w['Date'], y=df_w['Ideal'], mode='lines', name='Target', line=dict(color='#10b981', dash='dash')))
                 fig.update_layout(height=350, margin=dict(l=10, r=10, t=10, b=10), hovermode="x unified", legend=dict(orientation="h", y=-0.2))
                 st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
-                
                 st.markdown("#### 📋 Weight History (Read Only)")
                 disp_df = df_w[['Date', 'Weight']].copy()
                 disp_df['Date'] = disp_df['Date'].dt.strftime('%Y-%m-%d')

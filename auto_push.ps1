@@ -27,6 +27,9 @@ try {
 
     if (-not $SkipPull) {
         git pull --rebase
+        if ($LASTEXITCODE -ne 0) {
+            throw "Pull failed (usually because of local changes). Run with -SkipPull or commit/stash first."
+        }
     }
 
     git add -A
@@ -42,7 +45,14 @@ try {
     }
 
     git commit -m $Message
+    if ($LASTEXITCODE -ne 0) {
+        throw "Commit failed."
+    }
+
     git push
+    if ($LASTEXITCODE -ne 0) {
+        throw "Push failed."
+    }
 
     Write-Host "Done. Changes were pushed to GitHub."
 }

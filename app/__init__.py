@@ -1,0 +1,1 @@
+"""MyFitness Pro application package."""

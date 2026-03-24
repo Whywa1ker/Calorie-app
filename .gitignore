@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Streamlit and local runtime
+.streamlit/
+
+# Local user/app data (do not push private data)
+myfitness_users_db.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
